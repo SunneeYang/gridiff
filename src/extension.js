@@ -1,13 +1,12 @@
 'use strict';
 const path = require('node:path');
 const vscode = require('vscode');
-const { readTable } = require('./csv');
-const { compareTables } = require('./diff');
 const { webviewHTML } = require('./webview');
+const { createComparison, MAX_BYTES } = require('./comparison');
+const { readWorkbook } = require('./xlsx');
+const { readHeadWorkbook } = require('./git');
 
-const MAX_BYTES = 8 * 1024 * 1024;
-const MAX_CELLS = 1000000;
-const formatNames = { auto: '自动', csv: '普通 CSV（一行表头）', mova: 'Mova（四行表头）', headerless: '无表头', custom: '自定义多行表头' };
+const formatNames = { auto: '自动', csv: '普通表格（一行表头）', mova: 'Mova（四行表头）', 'mova-vertical': 'Mova 竖表', headerless: '无表头', custom: '自定义多行表头' };
 
 function activate(context) {
   let selectedLeft;
@@ -23,6 +22,7 @@ function activate(context) {
   const currentUri = uri => uri instanceof vscode.Uri ? uri : vscode.window.activeTextEditor?.document.uri;
   const label = uri => path.basename(uri.path).replace(/\.git$/, '');
   const isCSV = uri => /\.csv(?:\.git)?$/i.test(uri.path);
+  const isXLSX = uri => /\.xlsx(?:\.git)?$/i.test(uri.path);
   const pairKey = (left, right) => JSON.stringify([left.toString(), right.toString()]);
   const activeTab = () => vscode.window.tabGroups.activeTabGroup.activeTab;
   const autoEnabled = uri => vscode.workspace.getConfiguration('gridiff', uri).get('autoOpenDiff', true);
@@ -52,9 +52,17 @@ function activate(context) {
   async function openDiffTab(tab, automatic = false) {
     const input = tab?.input;
     if (stopped || !(input instanceof vscode.TabInputTextDiff)) return;
-    if (automatic && (!autoEnabled(input.modified) || (!isCSV(input.original) && !isCSV(input.modified)))) return;
+    const xlsx = isXLSX(input.original) || isXLSX(input.modified);
+    const supported = xlsx ? isXLSX(input.original) && isXLSX(input.modified) : isCSV(input.original) || isCSV(input.modified);
+    if (automatic && (!autoEnabled(input.modified) || !supported)) return;
     const key = pairKey(input.original, input.modified);
     if (automatic && nativeRequests.has(key)) { keepTextTab(tab, key); return; }
+    // VS Code opens a binary replacement before closing its old text-diff tab.
+    if (xlsx && !tabViews.has(tab)) {
+      const previousTab = vscode.window.tabGroups.all.flatMap(group => group.tabs).find(other => other !== tab &&
+        tabViews.get(other)?.key === key && tabViews.get(other).opened && other.input instanceof vscode.TabInputTextDiff && pairKey(other.input.original, other.input.modified) === key);
+      if (previousTab) tabViews.set(tab, tabViews.get(previousTab));
+    }
     const previous = tabViews.get(tab);
     if (previous?.key === key) {
       if (automatic) return;
@@ -75,6 +83,7 @@ function activate(context) {
         if (tabViews.get(tab) === entry && !entry.textOnly) tabViews.delete(tab);
         return;
       }
+      entry.opened = true;
       return show(input.original, input.modified, undefined, tab.group.viewColumn);
     });
     return entry.opening;
@@ -83,6 +92,10 @@ function activate(context) {
   const autoOpen = () => { void openDiffTab(activeTab(), true).catch(report); };
 
   async function read(uri) {
+    if (isXLSX(uri)) {
+      if ((await vscode.workspace.fs.stat(uri)).size > MAX_BYTES) throw new Error('单侧文件超过 8 MiB，请缩小工作簿。');
+      return Buffer.from(await vscode.workspace.fs.readFile(uri));
+    }
     const document = await vscode.workspace.openTextDocument(uri);
     const text = document.getText();
     if (Buffer.byteLength(text, 'utf8') > MAX_BYTES) throw new Error('单侧文件超过 8 MiB，请使用文本对比或缩小表格。');
@@ -90,46 +103,36 @@ function activate(context) {
   }
 
   async function show(left, right, load, column = vscode.ViewColumn.Active) {
-    if (!isCSV(left) && !isCSV(right)) return vscode.commands.executeCommand('vscode.diff', left, right, `${label(left)} ↔ ${label(right)}`);
+    const xlsx = isXLSX(left) || isXLSX(right);
+    if (xlsx && !(isXLSX(left) && isXLSX(right))) throw new Error('请选择两个 XLSX 文件进行比较；暂不支持 XLSX 与 CSV 混合比较。');
+    if (!xlsx && !isCSV(left) && !isCSV(right)) return vscode.commands.executeCommand('vscode.diff', left, right, `${label(left)} ↔ ${label(right)}`);
     let sources = [left, right];
-    let options = settings(right);
-    let texts, result, tables, error = '', busy = false, revision = 0, disposed = false;
+    const comparison = createComparison({ xlsx, workbookReader: readWorkbook, getDefaults: () => settings(right) });
+    let busy = false, disposed = false;
     const panel = vscode.window.createWebviewPanel('gridiff.diff', `Gridiff · ${label(right)}`, column, {
       enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'media')]
     });
     panels.set(panel, pairKey(...sources));
     const disposables = [];
     panel.onDidDispose(() => { disposed = true; panels.delete(panel); disposables.forEach(d => d.dispose()); });
-    const payload = () => ({ type: 'comparison', result, error, busy, revision, options,
-      title: label(sources[1]), sources: sources.map(u => u.toString(true)),
-      skipped: tables?.map(t => t.skippedBlankRows || 0) || [] });
+    const payload = () => ({ type: 'comparison', ...comparison.snapshot(), busy,
+      title: label(sources[1]), sources: sources.map(u => u.toString(true)) });
     const send = () => { if (!disposed) void panel.webview.postMessage(payload()); };
-    function compute() {
-      result = null; tables = null; error = '';
-      try {
-        if (!texts) return;
-        tables = texts.map(text => readTable(text, options));
-        const width = new Set(tables.flatMap(t => t.fields.map(f => f.name))).size;
-        if ((tables[0].rows.length + tables[1].rows.length) * width > MAX_CELLS) throw new Error('比较范围超过 100 万单元格，请缩小表格或使用文本对比。');
-        result = compareTables(...tables, options);
-      } catch (e) { error = e.message; }
-      revision++;
-    }
     async function refresh() {
       if (busy) return;
       busy = true; send();
       try {
-        texts = load ? await load() : await Promise.all(sources.map(read));
+        const texts = load ? await load() : await Promise.all(sources.map(read));
         if (disposed) return;
-        if (texts.some(text => Buffer.byteLength(text, 'utf8') > MAX_BYTES)) throw new Error('单侧文件超过 8 MiB，请使用文本对比或缩小表格。');
-        compute();
+        await comparison.load(texts);
       }
-      catch (e) { error = e.message; result = null; texts = null; tables = null; }
+      catch (e) { comparison.fail(e); }
       finally { busy = false; send(); }
     }
     async function chooseFormat() {
       const pick = await vscode.window.showQuickPick(Object.entries(formatNames).map(([value, title]) => ({ label: title, value })), { title: 'Gridiff · 表头格式', placeHolder: '两侧使用同一种表头配置' });
       if (!pick || disposed) return;
+      const { options } = comparison.snapshot();
       const next = { ...options, format: pick.value };
       if (pick.value === 'custom') {
         for (const [name, prompt, fallback] of [['headerRow', '字段名所在记录（从 1 开始）', 1], ['dataStartRow', '数据起始记录（从 1 开始）', 2], ['descriptionRow', '中文说明所在记录（0 表示无）', 0]]) {
@@ -139,25 +142,24 @@ function activate(context) {
           next[name] = Number(value);
         }
       }
-      options = next; compute(); send();
+      comparison.update(next); send();
     }
     async function chooseKeys() {
       const mode = await vscode.window.showQuickPick([
         { label: '按主键对齐', description: '选择一个或多个字段', value: 'key' },
         { label: '按行号对齐', description: '插入或删除记录会影响后续对齐', value: 'position' },
-        { label: '自动选择主键', description: '优先 id，否则第一列', value: 'auto' }
+        { label: '自动选择主键', description: 'Mova 竖表使用名称；其他表优先 id，否则第一列', value: 'auto' }
       ], { title: 'Gridiff · 记录对齐方式' });
       if (!mode || disposed) return;
+      const { options, keyFields } = comparison.snapshot();
       if (mode.value === 'key') {
-        if (!tables) throw new Error('请先选择能够解析两侧文件的表头格式。');
-        const nonempty = tables.filter(t => t.fields.length);
-        const fields = nonempty[0]?.fields.filter(f => nonempty.every(t => t.fields.some(other => other.name === f.name))) || [];
-        const picks = await vscode.window.showQuickPick(fields.map(f => ({ label: f.name, description: f.label !== f.name ? f.label : undefined, picked: options.keyColumns?.includes(f.name) })), { canPickMany: true, title: 'Gridiff · 选择主键字段', placeHolder: '组合字段必须唯一且非空' });
+        if (!comparison.tables) throw new Error('请先选择能够解析两侧文件的表头格式。');
+        const picks = await vscode.window.showQuickPick(keyFields.map(f => ({ label: f.name, description: f.label !== f.name ? f.label : undefined, picked: options.keyColumns?.includes(f.name) })), { canPickMany: true, title: 'Gridiff · 选择主键字段', placeHolder: '组合字段必须唯一且非空' });
         if (!picks || disposed) return;
         if (!picks.length) throw new Error('请至少选择一个字段。');
-        options = { ...options, alignment: 'key', keyColumns: picks.map(p => p.label) };
-      } else options = { ...options, alignment: mode.value === 'position' ? 'position' : 'key', keyColumns: [] };
-      compute(); send();
+        comparison.update({ alignment: 'key', keyColumns: picks.map(p => p.label) });
+      } else comparison.update({ alignment: mode.value === 'position' ? 'position' : 'key', keyColumns: [] });
+      send();
     }
     disposables.push(panel.webview.onDidReceiveMessage(async message => {
       if (!message || typeof message.action !== 'string') return;
@@ -167,12 +169,15 @@ function activate(context) {
         if (message.action === 'format') await chooseFormat();
         else if (message.action === 'keys') await chooseKeys();
         else if (message.action === 'refresh') await refresh();
+        else if (message.action === 'sheet' && xlsx) {
+          comparison.selectSheet(message.name); send();
+        }
         else if (message.action === 'swap') {
-          sources.reverse(); texts?.reverse();
+          sources.reverse(); comparison.swap();
           panels.set(panel, pairKey(...sources));
           if (load) { const previous = load; load = async () => (await previous()).reverse(); }
-          panel.title = `Gridiff · ${label(sources[1])}`; compute(); send();
-        } else if (message.action === 'native') await showNative(...sources);
+          panel.title = `Gridiff · ${label(sources[1])}`; send();
+        } else if (message.action === 'native' && !xlsx) await showNative(...sources);
       } catch (e) { report(e); }
     }));
     panel.webview.html = webviewHTML(panel.webview, context.extensionUri);
@@ -217,7 +222,7 @@ function activate(context) {
     if (!repository) throw new Error('未找到文件所属的 Git 仓库，请在 VS Code 中打开该仓库。');
     const left = git.toGitUri(right, 'HEAD');
     // Resolve HEAD explicitly: the Git filesystem can return empty text for a missing ref.
-    await show(left, right, async () => [await repository.show('HEAD', right.fsPath), await read(right)]);
+    await show(left, right, async () => [isXLSX(right) ? await readHeadWorkbook(git, repository, right) : await repository.show('HEAD', right.fsPath), await read(right)]);
   });
   context.subscriptions.push(
     vscode.window.tabGroups.onDidChangeTabs(event => {

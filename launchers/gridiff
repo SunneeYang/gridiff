@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+
+case "$0" in
+  */*) entry=$0 ;;
+  *) entry=$(command -v "$0") ;;
+esac
+directory=$(CDPATH= cd -P "$(dirname "$entry")" && pwd)
+
+case "$(uname -s)" in
+  Darwin) platform=darwin ;;
+  Linux) platform=linux ;;
+  *) printf '%s\n' 'Gridiff：不支持此系统。Windows 请使用 gridiff.cmd。' >&2; exit 1 ;;
+esac
+case "$(uname -m)" in
+  arm64|aarch64) arch=arm64 ;;
+  x86_64|amd64) arch=x64 ;;
+  *) printf '%s\n' 'Gridiff：目前只支持 ARM64 和 x64。' >&2; exit 1 ;;
+esac
+
+binary="$directory/bin/$platform-$arch/gridiff"
+if [ ! -f "$binary" ]; then
+  printf '%s\n' "Gridiff：缺少 $platform-$arch 程序，请先更新策划仓库。" >&2
+  exit 1
+fi
+if dd if="$binary" bs=128 count=1 2>/dev/null | LC_ALL=C grep -q '^version https://git-lfs.github.com/spec/v1'; then
+  printf '%s\n' 'Gridiff：当前文件是 Git LFS 指针，程序尚未取回。' '请在策划仓库执行：git lfs pull' >&2
+  exit 1
+fi
+if [ ! -x "$binary" ]; then
+  printf '%s\n' "Gridiff：程序没有执行权限，请执行：chmod +x \"$binary\"" >&2
+  exit 1
+fi
+exec "$binary" "$@"

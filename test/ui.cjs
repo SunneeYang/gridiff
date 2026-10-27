@@ -7,18 +7,20 @@ const vm = require('node:vm');
 const { chromium } = require('playwright');
 const { readTable } = require('../src/csv');
 const { compareTables } = require('../src/diff');
+const { readWorkbook, worksheetTable } = require('../src/xlsx');
+const { workbook } = require('./xlsx-fixtures');
 const root = path.resolve(__dirname, '..');
 const moduleStub = { exports: {} };
 let origin;
 vm.runInNewContext(fs.readFileSync(path.join(root, 'src/webview.js'), 'utf8'), {
   module: moduleStub,
-  require: name => name === 'vscode' ? { Uri: { joinPath: (_, dir, file) => `${origin}/${dir}/${file}` } } : require(name)
+  require: name => name === 'vscode' ? { Uri: { joinPath: (_, dir, file) => `${origin}/${dir}/${file}` } } : name.startsWith('.') ? require(path.join(root, 'src', name)) : require(name)
 });
 const server = http.createServer((request, response) => {
   if (request.url === '/') {
     let html = moduleStub.exports.webviewHTML({ cspSource: origin, asWebviewUri: uri => uri }, {});
     const nonce = html.match(/script nonce="([^"]+)"/)[1];
-    html = html.replace('<script nonce=', `<script nonce="${nonce}">window.acquireVsCodeApi=()=>({getState:()=>null,setState:()=>{},postMessage:()=>{}});</script><script nonce=`);
+    html = html.replace('<script nonce=', `<script nonce="${nonce}">window.messages=[];window.acquireVsCodeApi=()=>({getState:()=>null,setState:()=>{},postMessage:m=>window.messages.push(m)});</script><script nonce=`);
     response.setHeader('Content-Type', 'text/html'); response.end(html);
   } else if (request.url === '/theme.css') {
     response.setHeader('Content-Type', 'text/css');
@@ -140,7 +142,8 @@ const server = http.createServer((request, response) => {
       const row = page.locator(`tbody tr.${kind}`);
       assert.equal(await row.locator('.version').count(), 0);
       assert.equal(await row.locator('.value-line').count(), 4);
-      const color = await row.locator('.row-status').evaluate(node => getComputedStyle(node).color);
+      const color = await page.locator('body').evaluate(node => getComputedStyle(node).color);
+      assert.notEqual(await row.locator('.row-status').evaluate(node => getComputedStyle(node).color), color);
       assert.equal(await row.locator('.value-line > span').first().evaluate(node => getComputedStyle(node).color), color);
       assert.notEqual(await row.locator('.value-line').first().evaluate(node => getComputedStyle(node).backgroundColor), 'rgba(0, 0, 0, 0)');
     }
@@ -158,7 +161,8 @@ const server = http.createServer((request, response) => {
     assert.deepEqual(await page.locator('.change-record .record-id').allTextContents(), ['id  1', 'id  4', 'id  3']);
     for (const kind of ['added', 'removed']) {
       const record = page.locator('.change-record').filter({ has: page.locator(`.row-status.${kind}`) });
-      const color = await record.locator('.row-status').evaluate(node => getComputedStyle(node).color);
+      const color = await page.locator('body').evaluate(node => getComputedStyle(node).color);
+      assert.notEqual(await record.locator('.row-status').evaluate(node => getComputedStyle(node).color), color);
       assert.equal(await record.locator('.value-line > span').first().evaluate(node => getComputedStyle(node).color), color);
     }
     await page.getByRole('button', { name: '原表对照', exact: true }).click();
@@ -264,6 +268,41 @@ const server = http.createServer((request, response) => {
     await page.waitForFunction(() => document.querySelector('#schema-content').scrollTop > 0);
     assert.ok((await page.locator('.grid-wrap').boundingBox()).height >= 160);
     await page.locator('footer').scrollIntoViewIfNeeded();
+    await page.locator('#schema-title').click();
+    const typedTable = async rows => worksheetTable((await readWorkbook(await workbook({ Data: rows })))[0]);
+    const xlsx = compareTables(await typedTable([['id', 'typed', 'formula'], ['1', 1, { formula: '1+1', result: 2 }]]),
+      await typedTable([['id', 'typed', 'formula'], ['1', '1', { formula: '2*1', result: 2 }], ['2', '<script>bad()</script>', { formula: 'TODAY()' }]]));
+    await send({ ...payload, title: 'XLSX 类型与公式', sources: ['旧版本.xlsx', '新版本.xlsx'], revision: 16, xlsx: true, result: xlsx, sheetName: 'Data',
+      sheets: [{ name: 'Data', status: 'common', counts: xlsx.counts }, { name: '删除表', status: 'removed', counts: { added: 0, removed: 1, modified: 0 } }] });
+    assert.equal(await page.locator('[data-action="native"]').isVisible(), false);
+    assert.equal(await page.getByLabel('工作表', { exact: true }).isVisible(), true);
+    const typed = await cell('1', 'typed');
+    assert.match(await typed.innerText(), /数字/); assert.match(await typed.innerText(), /文本/);
+    const formula = await cell('1', 'formula');
+    assert.match(await formula.innerText(), /=1\+1/); assert.match(await formula.innerText(), /=2\*1/);
+    assert.match(await (await cell('2', 'formula')).innerText(), /无缓存结果/);
+    assert.equal(await page.locator('#content script').count(), 0);
+    await page.getByLabel('工作表', { exact: true }).selectOption('删除表');
+    assert.deepEqual(await page.evaluate(() => window.messages.at(-1)), { action: 'sheet', name: '删除表' });
+    await page.getByLabel('工作表', { exact: true }).selectOption('Data');
+    await page.getByRole('searchbox').fill('2*1');
+    await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 1);
+    await page.getByRole('searchbox').fill('');
+    await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 2);
+    await page.screenshot({ path: path.join(root, 'dist/gridiff-xlsx.png'), fullPage: true });
+    const vertical = compareTables(readTable('all,int32,None,无,0\nall,int32,All,所有单位,1\nall,int32,Near_1,最近1个,10'),
+      readTable('all,int32,None,无,0\ngo,int64,All,所有单位,2\nall,int32,Near_2,最近2个,11'));
+    await send({ ...payload, title: 'Mova 竖表', revision: 17, result: vertical });
+    assert.match(await page.locator('#format').textContent(), /Mova 竖表/);
+    assert.match(await page.locator('#keys').textContent(), /name/);
+    assert.deepEqual(await page.locator('thead .technical').allTextContents(), ['flags', 'type', 'name', 'comment', 'value']);
+    assert.match(await page.locator('thead').textContent(), /导出标记.*类型.*名称.*说明.*值/);
+    const changedEnum = page.locator('tbody tr').filter({ has: page.locator('.record-id').filter({ hasText: /^name  All$/ }) });
+    assert.equal(await changedEnum.locator('.identity strong').textContent(), '所有单位');
+    assert.equal(await changedEnum.locator('td').last().locator('.before > span:last-child').textContent(), '1');
+    assert.equal(await changedEnum.locator('td').last().locator('.after > span:last-child').textContent(), '2');
+    assert.equal(await page.locator('tbody tr').count(), 3);
+    await page.screenshot({ path: path.join(root, 'dist/gridiff-mova-vertical.png'), fullPage: true });
     assert.deepEqual(errors, []);
     console.log('Gridiff UI passed: both views, full cell text, viewport layout, keyboard scrolling, search, pagination, safe text, errors, light/dark screenshots.');
   } finally { await browser.close(); server.close(); }

@@ -1,0 +1,93 @@
+/* Each palette has a light and dark variant; diff semantics stay consistent. */
+html[data-host="browser"] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --fg: #25272b;
+  --muted: #61656d;
+  --line: #d9dce1;
+  --surface: #f5f6f8;
+  --hover: #edf0f4;
+  --selected: #0862b8;
+  --selected-fg: #ffffff;
+  --focus: #006fc4;
+  --input: #ffffff;
+  --input-fg: #25272b;
+  --added: #247443;
+  --removed: #a12b32;
+  --modified: #875b06;
+  --add-bg: #e0f2e6;
+  --remove-bg: #fce4e5;
+  --font: system-ui, sans-serif;
+  --mono: ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  html[data-host="browser"]:not([data-appearance]) {
+    color-scheme: dark;
+    --bg: #1e2025; --fg: #e5e7eb; --muted: #a6adba; --surface: #272a31; --input: #1e2025; --input-fg: #e5e7eb;
+  }
+}
+html[data-host="browser"][data-appearance="dark"] {
+  color-scheme: dark;
+  --bg: #1e2025;
+  --fg: #e5e7eb;
+  --muted: #a6adba;
+  --line: #424854;
+  --surface: #272a31;
+  --hover: #343943;
+  --selected: #a7cbff;
+  --selected-fg: #15263f;
+  --focus: #a7cbff;
+  --input: #1e2025;
+  --input-fg: #e5e7eb;
+  --added: #86d4a5;
+  --removed: #ff9ca5;
+  --modified: #e7c47a;
+  --add-bg: #233e32;
+  --remove-bg: #482e36;
+}
+html[data-host="browser"][data-palette="github"][data-appearance="light"] {
+  --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d1d9e0; --surface: #f6f8fa; --hover: #eaeef2;
+  --selected: #0969da; --selected-fg: #ffffff; --focus: #0969da; --input: #ffffff; --input-fg: #1f2328;
+  --added: #116329; --removed: #a40e26; --modified: #7d4e00; --add-bg: #dafbe1; --remove-bg: #ffebe9;
+}
+html[data-host="browser"][data-palette="github"][data-appearance="dark"] {
+  --bg: #0d1117; --fg: #e6edf3; --muted: #9da7b3; --line: #3d444d; --surface: #161b22; --hover: #262c36;
+  --selected: #79c0ff; --selected-fg: #0d1117; --focus: #79c0ff; --input: #0d1117; --input-fg: #e6edf3;
+  --added: #7ee787; --removed: #ffa198; --modified: #e3b341; --add-bg: #153721; --remove-bg: #492128;
+}
+html[data-host="browser"][data-palette="catppuccin"][data-appearance="light"] {
+  --bg: #eff1f5; --fg: #4c4f69; --muted: #5c5f77; --line: #bcc0cc; --surface: #e6e9ef; --hover: #dce0e8;
+  --selected: #1e66f5; --selected-fg: #ffffff; --focus: #1e66f5; --input: #eff1f5; --input-fg: #4c4f69;
+  --added: #356315; --removed: #b41439; --modified: #805a00; --add-bg: #deebcf; --remove-bg: #f4d9e0;
+}
+html[data-host="browser"][data-palette="catppuccin"][data-appearance="dark"] {
+  --bg: #1e1e2e; --fg: #cdd6f4; --muted: #a6adc8; --line: #585b70; --surface: #181825; --hover: #313244;
+  --selected: #cba6f7; --selected-fg: #1e1e2e; --focus: #cba6f7; --input: #1e1e2e; --input-fg: #cdd6f4;
+  --added: #a6e3a1; --removed: #f38ba8; --modified: #f9e2af; --add-bg: #293e37; --remove-bg: #482e41;
+}
+html[data-host="browser"][data-palette="solarized"][data-appearance="light"] {
+  --bg: #fdf6e3; --fg: #475f66; --muted: #50656c; --line: #c6c5b7; --surface: #eee8d5; --hover: #e4ddc8;
+  --selected: #006a9d; --selected-fg: #fdf6e3; --focus: #006a9d; --input: #fdf6e3; --input-fg: #475f66;
+  --added: #526600; --removed: #b52b28; --modified: #846000; --add-bg: #e4eac5; --remove-bg: #f8dfcf;
+}
+html[data-host="browser"][data-palette="solarized"][data-appearance="dark"] {
+  --bg: #002b36; --fg: #d4d8c8; --muted: #a1b5b5; --line: #41616a; --surface: #073642; --hover: #164651;
+  --selected: #80c7d8; --selected-fg: #002b36; --focus: #80c7d8; --input: #002b36; --input-fg: #d4d8c8;
+  --added: #b1c76b; --removed: #f39382; --modified: #e3be69; --add-bg: #254535; --remove-bg: #463b3a;
+}
+html[data-host="browser"][data-palette="nord"][data-appearance="light"] {
+  --bg: #eceff4; --fg: #2e3440; --muted: #4c566a; --line: #b2bdce; --surface: #e5e9f0; --hover: #d8dee9;
+  --selected: #476585; --selected-fg: #ffffff; --focus: #476585; --input: #eceff4; --input-fg: #2e3440;
+  --added: #426532; --removed: #963d4a; --modified: #805b27; --add-bg: #d6e6d3; --remove-bg: #f0d7de;
+}
+html[data-host="browser"][data-palette="nord"][data-appearance="dark"] {
+  --bg: #2e3440; --fg: #eceff4; --muted: #b8c3d7; --line: #59667e; --surface: #343d4c; --hover: #434c5e;
+  --selected: #88c0d0; --selected-fg: #2e3440; --focus: #88c0d0; --input: #2e3440; --input-fg: #eceff4;
+  --added: #b4d5a0; --removed: #e6a1ab; --modified: #ebcb8b; --add-bg: #3b4c43; --remove-bg: #53404d;
+}
+.theme-controls { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 16px; padding: 0 24px 14px; }
+.theme-controls label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.theme-controls select { max-width: 180px; }
+#theme-save-status { color: var(--removed); font-size: 12px; }
+#theme-save-status:empty { display: none; }
+@media (max-width: 550px) { .theme-controls { padding-inline: 12px; justify-content: flex-start; gap: 12px; } }

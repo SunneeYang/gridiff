@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { workbook } = require('./xlsx-fixtures');
 
 function harness({ startup = false, auto = true } = {}) {
   const commands = new Map(), documents = new Map(), panels = [], errors = [], native = [], picks = [];
@@ -44,7 +45,13 @@ function harness({ startup = false, auto = true } = {}) {
   }
   const vscode = {
     Uri, TabInputTextDiff, TabInputWebview, ViewColumn: { Active: -1 },
-    workspace: { getConfiguration: () => ({ get: (key, fallback) => defaults[key] ?? fallback }), onDidChangeConfiguration: configChanged.event, openTextDocument: async uri => {
+    workspace: { fs: {
+      stat: async uri => ({ size: (await documents.get(uri.toString()))?.length || 0 }),
+      readFile: async uri => {
+        if (!documents.has(uri.toString())) throw new Error('File not found');
+        return documents.get(uri.toString());
+      }
+    }, getConfiguration: () => ({ get: (key, fallback) => defaults[key] ?? fallback }), onDidChangeConfiguration: configChanged.event, openTextDocument: async uri => {
       if (!documents.has(uri.toString())) throw new Error('File not found');
       const text = await documents.get(uri.toString()); return { getText: () => text };
     } },
@@ -103,9 +110,118 @@ function harness({ startup = false, auto = true } = {}) {
     openDiff, closeTab, activateTab, emitGroups: () => groupsChanged.fire({ opened: [], changed: [group], closed: [] }),
     setAuto: enabled => { defaults.autoOpenDiff = enabled; configChanged.fire({ affectsConfiguration: key => key === 'gridiff.autoOpenDiff' }); },
     dispose: () => subscriptions.forEach(item => item.dispose()),
-    latest: () => panels.at(-1).captured.messages.at(-1), send: action => panels.at(-1).captured.receive({ action }) };
+    latest: () => panels.at(-1).captured.messages.at(-1), send: action => panels.at(-1).captured.receive(typeof action === 'string' ? { action } : action) };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('Mova vertical CSV diffs automatically keep every enum row and align by name', async () => {
+  const h = harness();
+  h.documents.set(h.left.toString(), 'all,int32,None,无,0\nall,int32,All,所有单位,1');
+  h.documents.set(h.right.toString(), 'all,int32,None,无,0\nall,int32,All,所有单位,2\nall,int32,Near_1,最近1个,10');
+  h.openDiff(h.left, h.right); await settle();
+  assert.equal(h.latest().error, '');
+  assert.deepEqual(h.latest().result.keys, ['name']);
+  assert.equal(h.latest().result.counts.unchanged, 1);
+  assert.equal(h.latest().result.counts.modified, 1);
+  assert.equal(h.latest().result.counts.added, 1);
+  h.dispose();
+});
+
+test('Fork XLSX diff auto-opens, pins the binary source and does not bounce after closing', async () => {
+  const h = harness();
+  const left = h.vscode.Uri.file('/fork/old/book.xlsx'), right = h.vscode.Uri.file('/fork/new/book.xlsx');
+  h.documents.set(left.toString(), await workbook({ Data: [['id', 'v'], ['1', 'old']] }));
+  h.documents.set(right.toString(), await workbook({ Data: [['id', 'v'], ['1', 'new']] }));
+  h.vscode.workspace.openTextDocument = () => { throw new Error('Binary files must not use the text reader'); };
+  const tab = h.openDiff(left, right);
+  await settle();
+  assert.equal(h.panels.length, 1, 'XLSX diff must automatically open Gridiff');
+  assert.equal(tab.isPreview, false, 'original tab remains pinned for Fork --wait');
+  for (let i = 0; i < 100 && h.latest().busy; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(h.latest().error, ''); assert.equal(h.latest().result.counts.modified, 1);
+  h.panels[0].dispose(); await settle();
+  assert.equal(h.vscode.window.tabGroups.activeTabGroup.activeTab, tab);
+  assert.equal(h.panels.length, 1, 'closing Gridiff must not reopen it');
+  await h.commands.get('gridiff.openDiff')();
+  assert.equal(h.panels.length, 2, 'manual command still reopens the XLSX comparison');
+});
+
+test('XLSX auto-open respects the switch and leaves mixed-format pairs alone', async () => {
+  const h = harness({ auto: false });
+  const uri = h.vscode.Uri.file('/fork/book.xlsx');
+  h.openDiff(uri, uri); await settle(); assert.equal(h.panels.length, 0);
+  h.openDiff(uri, h.right); h.setAuto(true); await settle();
+  assert.equal(h.panels.length, 0); assert.deepEqual(h.errors, []);
+});
+
+test('binary editor replacement inherits dismissal without suppressing a later fresh diff', async () => {
+  const h = harness();
+  const left = h.vscode.Uri.file('/fork/old.xlsx'), right = h.vscode.Uri.file('/fork/new.xlsx');
+  const bytes = await workbook({ Data: [['id'], ['1']] });
+  h.documents.set(left.toString(), bytes); h.documents.set(right.toString(), bytes);
+  const original = h.openDiff(left, right); await settle();
+  h.panels[0].dispose(); await settle();
+  // VS Code opens the binary replacement before closing the old text-diff tab.
+  const replacement = h.openDiff(left, right);
+  h.closeTab(original); await settle();
+  assert.equal(h.panels.length, 1, 'the replacement remembers closing Gridiff');
+  h.closeTab(replacement); h.openDiff(left, right); await settle();
+  assert.equal(h.panels.length, 2, 'a fresh invocation can auto-open again');
+});
+
+test('binary replacement during pinning can finish opening instead of inheriting an abandoned attempt', async () => {
+  const h = harness(); let release, first = true;
+  const waiting = new Promise(resolve => { release = resolve; });
+  h.controls.beforePin = () => { if (first) { first = false; return waiting; } };
+  const left = h.vscode.Uri.file('/fork/old.xlsx'), right = h.vscode.Uri.file('/fork/new.xlsx');
+  const bytes = await workbook({ Data: [['id'], ['1']] });
+  h.documents.set(left.toString(), bytes); h.documents.set(right.toString(), bytes);
+  const original = h.openDiff(left, right); await settle();
+  h.openDiff(left, right); await settle();
+  h.closeTab(original); release(); await settle();
+  assert.equal(h.panels.length, 1);
+});
+
+test('XLSX file comparison selects sheets by name, preserves order and refreshes swapped snapshots', async () => {
+  const h = harness();
+  const left = h.vscode.Uri.file('/repo/old.xlsx'), right = h.vscode.Uri.file('/repo/new.xlsx');
+  h.documents.set(left.toString(), await workbook({ Data: [['id', 'v'], ['1', 'old']], Deleted: [['id', 'v'], ['x', 1]], Stable: [['id'], ['1']] }));
+  h.documents.set(right.toString(), await workbook({ Stable: [['id'], ['1']], Data: [['id', 'v'], ['1', 'new']], Added: [['id'], ['2']] }));
+  h.vscode.workspace.openTextDocument = () => { throw new Error('XLSX must not use text decoding'); };
+  await h.commands.get('gridiff.compareFiles')(left, [left, right]);
+  assert.equal(h.latest().error, ''); assert.equal(h.latest().xlsx, true);
+  assert.equal(h.latest().sheetName, 'Data');
+  assert.deepEqual(h.latest().sheets.map(s => s.name), ['Stable', 'Data', 'Added', 'Deleted']);
+  assert.equal(h.latest().sheets[2].counts.added, 1); assert.equal(h.latest().sheets[3].counts.removed, 1);
+  await h.send({ action: 'sheet', name: 'Deleted' });
+  assert.equal(h.latest().result.rows[0].status, 'removed');
+  await h.send('swap'); assert.equal(h.latest().result.rows[0].status, 'added');
+  await h.send('refresh'); assert.equal(h.latest().result.rows[0].status, 'added');
+  await h.send('native'); assert.equal(h.native.filter(call => call[0] === 'vscode.diff').length, 0);
+  await h.send({ action: 'sheet', name: 'unknown' }); assert.equal(h.latest().sheetName, 'Deleted');
+});
+
+test('XLSX sheet errors are isolated and per-sheet alignment survives switching', async () => {
+  const h = harness(), uri = h.vscode.Uri.file('/repo/book.xlsx');
+  h.documents.set(uri.toString(), await workbook({ Good: [['id', 'v'], ['1', 2]], Duplicate: [['id', 'v'], ['1', 2], ['1', 3]] }));
+  await h.commands.get('gridiff.compareFiles')(uri, [uri, uri]);
+  assert.equal(h.latest().sheetName, 'Duplicate'); assert.match(h.latest().error, /重复/);
+  h.picks.push({ value: 'position' }); await h.send('keys');
+  assert.equal(h.latest().error, '');
+  await h.send({ action: 'sheet', name: 'Good' }); assert.equal(h.latest().result.alignment, 'key');
+  await h.send({ action: 'sheet', name: 'Duplicate' }); assert.equal(h.latest().result.alignment, 'position');
+  await h.send('refresh'); assert.equal(h.latest().result.alignment, 'position');
+});
+
+test('XLSX blocks mixed formats and oversized files before reading bytes', async () => {
+  const h = harness(), uri = h.vscode.Uri.file('/repo/book.xlsx');
+  await h.commands.get('gridiff.compareFiles')(uri, [uri, h.right]);
+  assert.match(h.errors[0], /混合比较/); assert.equal(h.panels.length, 0);
+  h.vscode.workspace.fs.stat = async () => ({ size: 8 * 1024 * 1024 + 1 });
+  h.vscode.workspace.fs.readFile = async () => { throw new Error('should not read'); };
+  await h.commands.get('gridiff.compareFiles')(uri, [uri, uri]);
+  assert.match(h.latest().error, /8 MiB/);
+});
 
 test('current diff preserves Git URI, snapshot swap, refresh and native fallback', async () => {
   const h = harness(); await h.commands.get('gridiff.openDiff')();

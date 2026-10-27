@@ -1,20 +1,21 @@
 'use strict';
 (() => {
-  const vscode = acquireVsCodeApi();
+  const host = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : window.gridiffHost;
   const $ = id => document.getElementById(id);
-  const saved = vscode.getState() || {};
+  const saved = host.getState() || {};
   const state = { view: saved.view || 'grid', onlyChanges: saved.onlyChanges !== false, onlyFields: saved.onlyFields !== false,
     query: saved.query || '', page: 0 };
   let data = null, model = null, revision = -1;
   const statusNames = { added: '+ 新增', removed: '− 删除', modified: '~ 修改', unchanged: '未变化' };
-  const formatNames = { auto: '自动', csv: '普通 CSV', mova: 'Mova 四行表头', headerless: '无表头', custom: '自定义表头' };
+  const formatNames = { auto: '自动', csv: '一行表头', mova: 'Mova 四行表头', 'mova-vertical': 'Mova 竖表', headerless: '无表头', custom: '自定义表头' };
+  const typeNames = { empty: '空值', string: '文本', number: '数字', boolean: '布尔值', date: '日期', error: '错误' };
   function element(tag, text, className) {
     const node = document.createElement(tag);
     if (text !== undefined) node.textContent = text;
     if (className) node.className = className;
     return node;
   }
-  function persist() { vscode.setState({ view: state.view, onlyChanges: state.onlyChanges, onlyFields: state.onlyFields, query: state.query }); }
+  function persist() { host.setState({ view: state.view, onlyChanges: state.onlyChanges, onlyFields: state.onlyFields, query: state.query }); }
   function marked(value, other) {
     const span = element('span');
     if (value === null) { span.textContent = '不存在'; span.className = 'muted absent'; return span; }
@@ -48,9 +49,21 @@
       const line = element('div', undefined, `value-line ${side}`);
       if (singleSide) line.classList.add(rowStatus);
       if (!singleSide) line.append(element('span', label, 'version'));
-      line.append(marked(cell[side], cell[other])); node.append(line);
+      const value = marked(cell[side], cell[other]); line.append(value);
+      const meta = cell[`${side}Meta`], otherMeta = cell[`${other}Meta`];
+      if (meta) {
+        if (meta.formula !== undefined) value.append(element('code', cell[side] === `=${meta.formula}`
+          ? (meta.raw === null ? '（无缓存结果）' : '（结果为空文本）') : `=${meta.formula}`, 'formula'));
+        const differentRaw = meta.raw !== null && String(meta.raw) !== cell[side];
+        if ((otherMeta && meta.type !== otherMeta.type) || (cell.changed && cell.before === cell.after && meta.raw !== otherMeta?.raw) || differentRaw) {
+          const raw = differentRaw ? ` · ${String(meta.raw)}` : '';
+          value.append(element('span', `${typeNames[meta.type] || meta.type}${raw}`, 'cell-meta'));
+        }
+      }
+      node.append(line);
     }
-    const change = delta(cell.before, cell.after);
+    const numeric = (!cell.beforeMeta && !cell.afterMeta) || (cell.beforeMeta?.type === 'number' && cell.afterMeta?.type === 'number');
+    const change = numeric ? delta(cell.beforeMeta ? String(cell.beforeMeta.raw) : cell.before, cell.afterMeta ? String(cell.afterMeta.raw) : cell.after) : '';
     if (change) node.append(element('span', change, 'delta'));
     return node;
   }
@@ -63,7 +76,7 @@
   }
   const hasSchemaCells = row => row.cells.some((cell, i) => cell.changed && (!model.fields[i].before || !model.fields[i].after));
   function recordLabel(row) {
-    const nameIndex = model.fields.findIndex(f => /^(name|名称|名字)$/i.test(f.name));
+    const nameIndex = model.fields.findIndex(f => model.formats.includes('mova-vertical') ? f.name === 'comment' : /^(name|名称|名字)$/i.test(f.name));
     return nameIndex < 0 ? '' : row.cells[nameIndex].after || row.cells[nameIndex].before || '';
   }
   function identity(row) {
@@ -105,7 +118,7 @@
     const query = state.query.toLocaleLowerCase();
     const filtered = model.rows.filter(row =>
       (!state.onlyChanges || row.status !== 'unchanged' || row.moved || hasSchemaCells(row)) &&
-      (!query || row.identity.toLocaleLowerCase().includes(query) || row.cells.some(c => [c.before, c.after].some(v => v?.toLocaleLowerCase().includes(query)))));
+      (!query || row.identity.toLocaleLowerCase().includes(query) || row.cells.some(c => [c.before, c.after, c.beforeMeta?.formula, c.afterMeta?.formula, c.beforeMeta?.raw, c.afterMeta?.raw].some(v => v != null && String(v).toLocaleLowerCase().includes(query)))));
     // Select columns from the whole comparison so search and pagination keep the same header.
     const changedFields = new Set();
     for (const row of model.rows) {
@@ -159,7 +172,7 @@
       }
     }
   }
-  document.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', () => vscode.postMessage({ action: button.dataset.action })));
+  document.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', () => host.postMessage({ action: button.dataset.action })));
   $('grid-tab').addEventListener('click', () => { state.view = 'grid'; render(); });
   $('list-tab').addEventListener('click', () => { state.view = 'list'; render(); });
   $('only-changes').addEventListener('change', e => { state.onlyChanges = e.target.checked; state.page = 0; render(); });
@@ -169,7 +182,19 @@
   $('search').addEventListener('input', e => { state.query = e.target.value; state.page = 0; clearTimeout(searchTimer); searchTimer = setTimeout(render, 150); });
   $('prev').addEventListener('click', () => { state.page--; render(); });
   $('next').addEventListener('click', () => { state.page++; render(); });
+  $('sheet').addEventListener('change', event => host.postMessage({ action: 'sheet', name: event.target.value }));
   window.addEventListener('message', event => {
+    if (window.gridiffHost && event.source !== null) return;
+    if (event.data?.type === 'session-ended') {
+      data = model = null; state.query = ''; clearTimeout(searchTimer);
+      $('title').textContent = '比较已结束'; $('sources').textContent = ''; $('sources').title = '';
+      $('summary').replaceChildren(); $('schema-content').replaceChildren(); $('schema-title').textContent = ''; $('schema').hidden = true;
+      $('content').replaceChildren(); $('notice').textContent = event.data.message; $('error').hidden = true;
+      $('status').textContent = '只读比较'; $('page').textContent = ''; $('search').value = '';
+      $('sheet').replaceChildren(); $('sheet-label').hidden = true; $('keys').textContent = '主键'; $('format').textContent = '格式';
+      document.querySelectorAll('button, input, select').forEach(node => { node.disabled = true; });
+      return;
+    }
     if (event.data?.type !== 'comparison') return;
     data = event.data; model = data.result;
     if (revision !== data.revision) { state.page = 0; revision = data.revision; }
@@ -178,15 +203,25 @@
     $('format').textContent = `格式：${formatNames[data.options.format]}${model && data.options.format === 'auto' ? ` (${model.formats.map(f => formatNames[f]).join(' / ')})` : ''}`;
     $('keys').textContent = data.options.alignment === 'position' ? '对齐：行号' : `主键：${model?.keys.join(' + ') || data.options.keyColumns?.join(' + ') || '自动'}`;
     document.querySelectorAll('[data-action]').forEach(button => { button.disabled = data.busy; });
-    $('error').hidden = !data.error; $('error').textContent = data.error ? `${data.error} 可调整格式、主键，或打开文本对比。` : '';
+    document.querySelector('[data-action="native"]').hidden = !!data.xlsx || !!data.readonlySnapshot;
+    $('sheet-label').hidden = !data.xlsx;
+    $('sheet').replaceChildren(); $('sheet').disabled = data.busy;
+    for (const sheet of data.sheets || []) {
+      const status = sheet.status === 'added' ? ' · 新增工作表' : sheet.status === 'removed' ? ' · 删除工作表' : '';
+      const counts = sheet.counts ? ` · +${sheet.counts.added} −${sheet.counts.removed} ~${sheet.counts.modified}` : '';
+      const option = element('option', `${sheet.name}${status}${sheet.error ? ' · 需调整设置' : counts}`);
+      option.value = sheet.name; option.selected = sheet.name === data.sheetName; $('sheet').append(option);
+    }
+    $('error').hidden = !data.error; $('error').textContent = data.error ? `${data.error} ${data.xlsx ? '可调整当前工作表的表头、主键，或检查源文件。' : data.readonlySnapshot ? '可调整格式、主键，或检查源文件。' : '可调整格式、主键，或打开文本对比。'}` : '';
     const notices = [];
     if (data.busy) notices.push('正在读取并计算差异…');
     if (model?.alignment === 'position') notices.push('按行号对齐：插入或删除记录可能使后续记录错位。');
     if (data.skipped?.some(Boolean)) notices.push(`已忽略全空分隔记录：旧 ${data.skipped[0]} / 新 ${data.skipped[1]} 条。`);
     if (model?.unkeyed?.before || model?.unkeyed?.after) notices.push(`Mova 无主键行：旧 ${model.unkeyed.before} / 新 ${model.unkeyed.after} 条；按完整内容匹配并保留重复次数，未匹配的分别显示新增/删除，不推断顺序。`);
-    notices.push('当前显示读取时的快照；文件修改后请重新读取。');
+    if (data.xlsx) notices.push('XLSX 比较已保存的数据和公式；公式结果来自文件缓存，不重新计算。忽略字体、颜色、图表等样式变化。');
+    notices.push(data.readonlySnapshot ? '当前显示内存中的只读快照；文件修改后请从 Fork 重新打开比较。' : '当前显示读取时的快照；文件修改后请重新读取。');
     $('notice').textContent = notices.join(' ');
     renderSummary(); renderSchema(); render();
   });
-  vscode.postMessage({ action: 'ready' });
+  host.postMessage({ action: 'ready' });
 })();

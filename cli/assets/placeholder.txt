@@ -1,0 +1,1 @@
+Build scripts replace this placeholder with embedded web assets.

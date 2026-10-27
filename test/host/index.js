@@ -5,13 +5,20 @@ const os = require('node:os');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const vscode = require('vscode');
+const { workbook } = require('../xlsx-fixtures');
+const { readHeadWorkbook } = require('../../src/git');
+const { readWorkbook, worksheetTable } = require('../../src/xlsx');
+const { compareTables } = require('../../src/diff');
 
 async function waitForTab(Type) {
   for (let i = 0; i < 200; i++) {
     if (vscode.window.tabGroups.activeTabGroup.activeTab?.input instanceof Type) return;
     await new Promise(resolve => setTimeout(resolve, 50));
   }
-  assert.fail(`Expected ${Type.name}; got ${vscode.window.tabGroups.activeTabGroup.activeTab?.input?.constructor.name}`);
+  const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+  const names = [vscode.TabInputTextDiff, vscode.TabInputWebview];
+  const labels = ['TabInputTextDiff', 'TabInputWebview'];
+  assert.fail(`Expected ${labels[names.indexOf(Type)] || Type.name}; got ${labels[names.findIndex(type => input instanceof type)] || input?.constructor.name}`);
 }
 
 async function run() {
@@ -67,7 +74,51 @@ async function run() {
     await vscode.commands.executeCommand('gridiff.compareHead', vscode.Uri.file(file));
     await waitForTab(vscode.TabInputWebview);
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+    const bookFile = path.join(repoPath, 'sample.xlsx'), bookUri = vscode.Uri.file(bookFile);
+    const oldBook = await workbook({ Data: [['id', 'v'], ['1', { formula: '1+1', result: 2 }]], Removed: [['id'], ['x']] });
+    fs.writeFileSync(bookFile, oldBook);
+    fs.writeFileSync(path.join(repoPath, '.gitattributes'), '*.xlsx diff=xlsx\n');
+    gitCommand('config', 'diff.xlsx.textconv', 'echo converted');
+    gitCommand('add', 'sample.xlsx', '.gitattributes');
+    gitCommand('-c', 'user.name=Gridiff Test', '-c', 'user.email=gridiff@example.invalid', 'commit', '-m', 'XLSX fixture');
+    const newBook = await workbook({ Data: [['id', 'v'], ['1', { formula: '2*1', result: 2 }]], Added: [['id'], ['y']] });
+    fs.writeFileSync(bookFile, newBook);
+    assert.deepEqual(await readHeadWorkbook(git, repository, bookUri), oldBook, 'HEAD returns unconverted XLSX bytes');
+    const before = await readWorkbook(await readHeadWorkbook(git, repository, bookUri));
+    const after = await readWorkbook(await vscode.workspace.fs.readFile(bookUri));
+    assert.equal(compareTables(worksheetTable(before[0]), worksheetTable(after[0])).counts.modified, 1);
+    await vscode.commands.executeCommand('gridiff.compareHead', bookUri);
+    await waitForTab(vscode.TabInputWebview);
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+    const oldFile = path.join(repoPath, 'old.xlsx'); fs.writeFileSync(oldFile, oldBook);
+    await vscode.commands.executeCommand('gridiff.compareFiles', bookUri, [vscode.Uri.file(oldFile), bookUri]);
+    await waitForTab(vscode.TabInputWebview);
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    await vscode.workspace.getConfiguration('gridiff').update('autoOpenDiff', true, vscode.ConfigurationTarget.Global);
+    await vscode.commands.executeCommand('vscode.diff', vscode.Uri.file(oldFile), bookUri, 'Fork XLSX diff', { preview: true });
+    await waitForTab(vscode.TabInputWebview);
+    const binaryTab = tabs().find(tab => tab.input instanceof vscode.TabInputTextDiff && tab.input.original.fsPath === oldFile && tab.input.modified.fsPath === bookFile);
+    assert.ok(binaryTab, 'binary diff exposes both file URIs through TabInputTextDiff');
+    assert.equal(binaryTab.isPreview, false, 'binary source remains pinned');
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+    await waitForTab(vscode.TabInputTextDiff);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.equal(tabs().filter(tab => tab.input instanceof vscode.TabInputWebview).length, 0, `XLSX close does not bounce: ${JSON.stringify(tabs().map(tab => ({ label: tab.label, active: tab.isActive, type: tab.input.constructor.name, original: tab.input.original?.path, modified: tab.input.modified?.path })))}`);
+    const resolvedBinaryTab = tabs().find(tab => tab.input instanceof vscode.TabInputTextDiff && tab.input.original.fsPath === oldFile && tab.input.modified.fsPath === bookFile);
+    assert.ok(resolvedBinaryTab, 'the binary replacement remains open after dismissing Gridiff');
+    await vscode.window.tabGroups.close(resolvedBinaryTab);
   } finally { fs.rmSync(repoPath, { recursive: true, force: true }); }
-  console.log('GRIDiff_HOST_TESTS_PASSED: startup auto-open, pinned source diff, no bounce, reopening, setting toggle, manual commands, native fallback, Git HEAD and git URI');
+  console.log('GRIDiff_HOST_TESTS_PASSED: CSV startup, manual commands, native fallback, Git HEAD; XLSX files, formula comparison and binary HEAD bypassing textconv');
+  if (process.env.GRIDIFF_HOST_REPORT) fs.writeFileSync(process.env.GRIDIFF_HOST_REPORT, JSON.stringify({
+    passed: true, vscode: vscode.version, xlsx: ['two files', 'formula comparison', 'HEAD ignores textconv', 'auto-open binary diff'], time: new Date().toISOString()
+  }, null, 2));
 }
-module.exports = { run };
+module.exports = { run: async () => {
+  try { await run(); }
+  catch (error) {
+    if (process.env.GRIDIFF_HOST_REPORT) fs.writeFileSync(process.env.GRIDIFF_HOST_REPORT, JSON.stringify({ passed: false, error: error.message, vscode: vscode.version,
+      tabs: vscode.window.tabGroups.all.flatMap(group => group.tabs).map(tab => ({ label: tab.label, active: tab.isActive, type: tab.input.constructor.name, original: tab.input.original?.path, modified: tab.input.modified?.path })) }));
+    throw error;
+  }
+} };

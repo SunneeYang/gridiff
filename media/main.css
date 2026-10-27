@@ -24,7 +24,12 @@ body { margin: 0; padding: 0; font: 13px/1.5 var(--font); background: var(--bg);
 html, body { overflow-x: clip; }
 #app { display: flex; flex-direction: column; height: 100vh; }
 #app > * { flex-shrink: 0; }
-button, input { font: inherit; color: inherit; }
+button, input, select { font: inherit; color: inherit; }
+select { max-width: 360px; background: var(--input); color: var(--input-fg); border: 1px solid var(--line); padding: 6px; border-radius: 3px; }
+select:focus-visible { outline: 2px solid var(--focus); }
+[hidden] { display: none !important; }
+.cell-meta, .formula { display: block; font-size: 11px; overflow-wrap: anywhere; }
+.cell-meta { color: var(--muted); }
 button { background: transparent; border: 1px solid var(--line); padding: 6px 10px; border-radius: 3px; cursor: pointer; white-space: nowrap; }
 button:hover { background: var(--hover); }
 button:active { transform: translateY(1px); }
@@ -85,11 +90,10 @@ tbody tr.added, tbody tr.removed, tbody tr.modified { color: var(--fg); }
 .field-title > .added-label, .field-title > .removed-label { display: block; font-size: 11px; margin-top: 4px; }
 .cell-value { width: 100%; min-width: 190px; padding: 12px; }
 .changed { background: color-mix(in srgb, var(--surface) 55%, var(--bg)); }
-.value-line { display: flex; gap: 9px; align-items: baseline; white-space: pre-wrap; overflow-wrap: anywhere; }
+.value-line { display: flex; gap: 9px; align-items: baseline; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg); }
 .value-line > span:last-child { min-width: 0; }
 .value-line + .value-line { margin-top: 6px; }
 .version { font: 10px var(--mono); color: var(--muted); flex: 0 0 14px; }
-.before { color: var(--muted); }
 mark { color: var(--fg); padding: 0 1px; background: var(--add-bg); }
 .before mark { background: var(--remove-bg); }
 .delta { display: block; color: var(--modified); font-size: 11px; font-variant-numeric: tabular-nums; margin: 7px 0 0 23px; }
@@ -103,8 +107,8 @@ footer nav { display: flex; gap: 12px; align-items: center; }
 .expanded .value-line { background: var(--bg); padding: 12px; margin: 0; min-width: 0; }
 .expanded .value-line:only-child { grid-column: 1 / -1; }
 .expanded .delta { grid-column: 1 / -1; margin: 0; }
-.value-line.added { color: var(--added); background: var(--add-bg); }
-.value-line.removed { color: var(--removed); background: var(--remove-bg); }
+.value-line.added { background: var(--add-bg); }
+.value-line.removed { background: var(--remove-bg); }
 .value-line.added .absent, .value-line.removed .absent { color: inherit; }
 .change-record { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 24px; padding: 20px 0; border-top: 1px solid var(--line); }
 .change-field + .change-field { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 16px; }
@@ -114,3 +118,15 @@ footer nav { display: flex; gap: 12px; align-items: center; }
 @media (max-width: 800px) { header { align-items: flex-start; flex-direction: column; } .actions { flex-shrink: 1; } .change-record { grid-template-columns: 150px minmax(0, 1fr); gap: 16px; } }
 @media (max-width: 550px) { header, .toolbar { padding-inline: 12px; } #content { margin-inline: 12px; } #schema, #error { margin-inline: 12px; } #summary { gap: 16px; padding: 16px 12px; } #notice, footer { padding-inline: 12px; } .expanded, .change-record { grid-template-columns: minmax(0, 1fr); } .search-label { margin-left: 0; } .sticky { min-width: 145px; max-width: 145px; } }
 @media (forced-colors: active) { mark { outline: 1px solid; } .changed { border-bottom: 2px solid; } }
+
+dialog { color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 24px; width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
+dialog::backdrop { background: #0006; }
+dialog form { display: grid; gap: 16px; }
+dialog label { display: grid; gap: 5px; }
+dialog select { max-width: 100%; }
+dialog input[type="number"] { box-sizing: border-box; width: 100%; padding: 6px; border: 1px solid var(--line); background: var(--input); color: var(--input-fg); }
+dialog fieldset { display: grid; gap: 12px; min-width: 0; border: 1px solid var(--line); padding: 12px; }
+dialog .key-choice { display: flex; align-items: baseline; gap: 8px; overflow-wrap: anywhere; }
+.settings-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.settings-error { color: var(--removed); }
+.settings-error:empty { display: none; }

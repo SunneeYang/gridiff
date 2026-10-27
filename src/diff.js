@@ -1,5 +1,10 @@
 'use strict';
 
+function cellIdentity(row, index, includeFormula = true) {
+  const meta = row.metadata?.[index];
+  return meta ? [meta.type, meta.raw, ...(includeFormula ? [meta.formula ?? null] : [])] : row.values[index];
+}
+
 function compareTables(before, after, options = {}) {
   const oldFields = new Map(before.fields.map((f, i) => [f.name, { ...f, index: i }]));
   const newFields = new Map(after.fields.map((f, i) => [f.name, { ...f, index: i }]));
@@ -8,8 +13,8 @@ function compareTables(before, after, options = {}) {
   let keys = options.keyColumns || [];
   const position = options.alignment === 'position';
   if (!position && !keys.length && names.length) {
-    const candidates = after.fields.length ? after.fields : before.fields;
-    keys = [candidates.find(f => f.name.toLowerCase() === 'id')?.name || candidates[0].name];
+    const table = after.fields.length ? after : before;
+    keys = [table.format === 'mova-vertical' ? 'name' : table.fields.find(f => f.name.toLowerCase() === 'id')?.name || table.fields[0].name];
   }
   if (new Set(keys).size !== keys.length) throw new Error('主键字段不能重复。');
   function index(table, fieldMap, side) {
@@ -20,13 +25,17 @@ function compareTables(before, after, options = {}) {
     const occurrences = new Map();
     table.rows.forEach((row, i) => {
       const parts = position ? [String(i + 1)] : keys.map(k => row.values[fieldMap.get(k).index]);
-      // Mova keeps empty-ID source rows in review CSVs but omits them from runtime data.
-      const unkeyed = !position && table.format === 'mova' && keys.length === 1 && keys[0].toLowerCase() === 'id' &&
-        fieldMap.get(keys[0]).index === 0 && parts[0] === '';
-      if (!position && !unkeyed && parts.some(part => !part.trim())) throw new Error(`${side}第 ${row.record} 条记录缺少主键值，请选择其他主键或按行号对齐。`);
-      let key = JSON.stringify(parts);
+      // Retain Mova source rows without an ID/name even when export omits them.
+      const unkeyed = !position && keys.length === 1 && parts[0] === '' &&
+        ((table.format === 'mova' && keys[0].toLowerCase() === 'id' && fieldMap.get(keys[0]).index === 0) ||
+         (table.format === 'mova-vertical' && keys[0] === 'name'));
+      if (!position && !unkeyed && keys.some(k => {
+        const j = fieldMap.get(k).index, meta = row.metadata?.[j];
+        return meta ? meta.raw == null || String(meta.raw).trim() === '' : !row.values[j].trim();
+      })) throw new Error(`${side}第 ${row.record} 条记录缺少主键值，请选择其他主键或按行号对齐。`);
+      let key = JSON.stringify(position ? parts : keys.map(k => cellIdentity(row, fieldMap.get(k).index, false)));
       if (unkeyed) {
-        const values = names.map(name => fieldMap.has(name) ? row.values[fieldMap.get(name).index] : null);
+        const values = names.map(name => fieldMap.has(name) ? cellIdentity(row, fieldMap.get(name).index) : null);
         const fingerprint = JSON.stringify(values);
         const occurrence = (occurrences.get(fingerprint) || 0) + 1;
         occurrences.set(fingerprint, occurrence);
@@ -73,8 +82,13 @@ function compareTables(before, after, options = {}) {
     const cells = fields.map(field => {
       const a = old && field.before ? old.values[field.before.index] : null;
       const b = next && field.after ? next.values[field.after.index] : null;
-      if (old && next && field.before && field.after && a !== b) changes++;
-      return { before: a, after: b, changed: a !== b };
+      const oldValue = old && field.before ? cellIdentity(old, field.before.index) : null;
+      const newValue = next && field.after ? cellIdentity(next, field.after.index) : null;
+      const changed = old?.metadata || next?.metadata ? JSON.stringify(oldValue) !== JSON.stringify(newValue) : a !== b;
+      if (old && next && field.before && field.after && changed) changes++;
+      return { before: a, after: b, changed,
+        ...(old?.metadata && field.before ? { beforeMeta: old.metadata[field.before.index] } : {}),
+        ...(next?.metadata && field.after ? { afterMeta: next.metadata[field.after.index] } : {}) };
     });
     const status = !old ? 'added' : !next ? 'removed' : changes ? 'modified' : 'unchanged';
     counts[status]++; counts.cells += changes;

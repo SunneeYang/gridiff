@@ -50,6 +50,56 @@ test('Mova ignores data beyond the header just as JSON export does', () => {
   assert.throws(() => readTable(before, { format: 'custom', headerRow: 3, descriptionRow: 4, dataStartRow: 5 }), /超出表头/);
   assert.throws(() => readTable('all,all,none\nint32,string\nid,name\n编号,名称\n1,A'), /超出表头/);
 });
+test('Mova vertical enums keep the first record and align by name in source order', () => {
+  const before = 'all,int32,None,无,0\nall,int32,All,所有单位,1\nall,int32,Near_1,最近的1个单位,10';
+  const after = 'all,int32,None,无,0\ngo,int64,All,全部单位,2\nall,int32,Near_2,最近的2个单位,11';
+  const table = readTable(before);
+  assert.equal(table.format, 'mova-vertical');
+  assert.equal(table.rows[0].record, 1);
+  assert.deepEqual(table.fields.map(f => [f.name, f.label]), [
+    ['flags', '导出标记'], ['type', '类型'], ['name', '名称'], ['comment', '说明'], ['value', '值']
+  ]);
+  const diff = compare(before, after);
+  assert.deepEqual(diff.keys, ['name']);
+  assert.deepEqual(diff.counts, { added: 1, removed: 1, modified: 1, unchanged: 1, moved: 0, cells: 4, schema: 0 });
+  assert.deepEqual(diff.rows.map(r => [r.identity, r.status]), [['None', 'unchanged'], ['All', 'modified'], ['Near_1', 'removed'], ['Near_2', 'added']]);
+  assert.deepEqual(compare('', after).counts, { added: 3, removed: 0, modified: 0, unchanged: 0, moved: 0, cells: 0, schema: 5 });
+  assert.equal(compare(before, '').counts.removed, 3);
+});
+
+test('Mova vertical structures, aliases and single enum rows preserve raw strings and blank positions', () => {
+  const structure = readTable('\nall,EFightCondition,type,类型\n\nall,Array（int32）,value,值');
+  assert.equal(structure.format, 'mova-vertical');
+  assert.deepEqual(structure.rows.map(r => r.record), [2, 4]);
+  assert.equal(structure.skippedBlankRows, 2);
+  assert.deepEqual(structure.rows[1].values, ['all', 'Array（int32）', 'value', '值', '']);
+  for (const type of ['长整数', '整数数组', '文本Map', 'array（string）', 'Map(int32)', 'uint64', 'range']) {
+    const table = readTable(`"all,i18n",${type},Title,标题,001`);
+    assert.equal(table.format, 'mova-vertical');
+    assert.equal(table.rows[0].values[1], type);
+    assert.equal(table.rows[0].values[4], '001');
+  }
+  assert.equal(compare('all,int32,A,说明', 'all,int32,A,说明,').counts.schema, 0);
+  assert.equal(readTable('none,CustomType,item', { format: 'mova-vertical' }).rows[0].values.length, 5);
+  assert.equal(readTable('all,type,name,comment,value\nx,number,a,b,c').format, 'csv');
+  assert.equal(readTable('all,int32,A,说明,1', { format: 'csv' }).format, 'csv');
+});
+
+test('Mova vertical review retains disabled rows, unnamed records, and extra notes', () => {
+  const base = 'all,int32,A,说明,1,尾注\nCOST_MUL,,Disabled,停用,14232\nall,string,,无名称,原文';
+  const after = base.replace('尾注', '新尾注').replace('原文', '新文');
+  const diff = compare(base, after);
+  assert.equal(diff.counts.unchanged, 1);
+  assert.equal(diff.counts.modified, 1);
+  assert.equal(diff.counts.added, 1);
+  assert.equal(diff.counts.removed, 1);
+  assert.equal(diff.fields[5].name, '列6');
+  assert.equal(diff.rows[0].cells[5].before, '尾注');
+  assert.deepEqual(diff.unkeyed, { before: 1, after: 1 });
+  assert.equal(compare(base + '\nall,string,,无名称,原文', base).counts.removed, 1);
+  assert.throws(() => compare(base + '\nall,int32,A,重复,2', base), /主键 A 重复/);
+  assert.throws(() => compare(base, base, { keyColumns: ['flags', 'name'] }), /缺少主键值/);
+});
 test('keys and column names align independently of their physical order', () => {
   const diff = compare('id,a,b\n001,x,y\n002,z,w', 'b,id,a\nw,002,z\ny,001,changed');
   assert.equal(diff.counts.modified, 1);
