@@ -72,8 +72,9 @@
     if (!field.before || !field.after) node.append(element('span', field.before ? '− 删除字段' : '+ 新增字段', field.before ? 'removed-label' : 'added-label'));
     return node;
   }
-  const hasSchemaCells = row => row.cells.some((cell, i) => cell.changed && (!model.fields[i].before || !model.fields[i].after));
+  const hasSchemaCells = row => row.schemaChanged || row.cells.some((cell, i) => cell.changed && (!model.fields[i].before || !model.fields[i].after));
   function recordLabel(row) {
+    if (row.displayName !== undefined) return row.displayName;
     const nameIndex = model.fields.findIndex(f => model.formats.includes('mova-vertical') ? f.name === 'comment' : /^(name|名称|名字)$/i.test(f.name));
     return nameIndex < 0 ? '' : row.cells[nameIndex].after || row.cells[nameIndex].before || '';
   }

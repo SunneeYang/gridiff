@@ -35,7 +35,7 @@ async function readWorkbookData(Workbook, input, onMetric) {
   onMetric?.({ phase: 'xlsx.load', ms: performance.now() - start, bytes: input.byteLength });
   start = onMetric ? performance.now() : 0;
   let area = 0;
-  // Both hosts strip unselected sheet ZIP members before loading.
+  // The plugin strips unselected sheet ZIP members before loading.
   const sheets = book.worksheets.map(sheet => {
     const values = [], metadata = [];
     let height = 0, width = 0;

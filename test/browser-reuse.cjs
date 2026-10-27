@@ -54,7 +54,8 @@ const { workbook } = require('./xlsx-fixtures');
     await Promise.all(latest.map(file => fs.unlink(file)));
     await page.waitForFunction(generation => window.gridiffPerf.result.generation > generation && document.querySelector('tbody')?.textContent.includes('replacement'), initial.generation);
     assert.equal(await page.evaluate(() => window.reuseMarker), 'retained-document');
-    assert.equal(await page.evaluate(() => window.gridiffPerf.result.workers), 1);
+    assert.equal(await page.evaluate(() => window.gridiffPerf.result.workers), 0);
+    assert.equal(await page.evaluate(() => window.gridiffPerf.result.native), true);
     assert.equal(await page.locator('#search').inputValue(), '');
     assert.equal(page.url(), url + '#profile=1');
 
@@ -66,7 +67,7 @@ const { workbook } = require('./xlsx-fixtures');
     const generation = (await (await fetch(url + 'snapshot')).json()).generation;
     await page.waitForFunction(generation => window.gridiffPerf.result.generation === generation && document.querySelector('tbody')?.textContent.includes('latest-csv'), generation);
     assert.equal(await page.locator('#sheet-label').isVisible(), false);
-    assert.equal(await page.evaluate(() => window.gridiffPerf.result.workers), 1);
+    assert.equal(await page.evaluate(() => window.gridiffPerf.result.workers), 0);
     await page.close();
     const discoveryName = (await fs.readdir(runtimeDirectory)).find(name => name.endsWith('.json'));
     const discoveryPath = path.join(runtimeDirectory, discoveryName);
@@ -96,6 +97,6 @@ const { workbook } = require('./xlsx-fixtures');
     const recovered = await submit(final);
     assert.notEqual(recovered, url);
     assert.deepEqual(errors, []);
-    console.log('Reusable browser passed: concurrent launch, paged global search/columns, latest-view wins, one document/Worker, deleted inputs, stale compute, reopening and abandoned discovery recovery.');
+    console.log('Reusable browser passed: concurrent launch, paged global search/columns, latest-view wins, one document with native computation, deleted inputs, stale compute, reopening and abandoned discovery recovery.');
   } finally { await browser.close(); for (const url of urls) await close(url); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

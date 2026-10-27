@@ -1,10 +1,8 @@
 package main
 
 import (
-	"archive/zip"
 	"bytes"
-	"io"
-	"strings"
+	"reflect"
 	"testing"
 )
 
@@ -12,12 +10,12 @@ func firstSheetFixture() map[string][]byte {
 	return map[string][]byte{
 		"xl/workbook.xml":                     []byte(`<workbook xmlns="` + spreadsheetNS + `" xmlns:r="` + relationshipNS + `"><bookViews><workbookView activeTab="1"/></bookViews><sheets><sheet name="Hidden first" state="hidden" sheetId="7" r:id="chosen"/><sheet name="Other" sheetId="1" r:id="other"/></sheets></workbook>`),
 		"xl/_rels/workbook.xml.rels":          []byte(`<Relationships xmlns="` + packageRelationshipNS + `"><Relationship Id="other" Type="` + relationshipNS + `/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="chosen" Type="` + relationshipNS + `/worksheet" Target="/xl/worksheets/sheet7.xml"/></Relationships>`),
-		"xl/worksheets/sheet7.xml":            []byte(`<worksheet><sheetData><row r="1"><c r="A1"><f>Other!A1</f><v>42</v></c></row></sheetData></worksheet>`),
+		"xl/worksheets/sheet7.xml":            []byte(`<worksheet><sheetData><row r="1"><c r="A1"><f>Other!A1</f><v>42</v></c><c r="B1" t="s"><v>0</v></c><c r="C1" s="1"><v>0.25</v></c></row></sheetData></worksheet>`),
 		"xl/worksheets/_rels/sheet7.xml.rels": []byte(`<Relationships/>`),
 		"xl/worksheets/sheet1.xml":            []byte(`invalid XML that must never be parsed`),
 		"xl/worksheets/_rels/sheet1.xml.rels": []byte(`invalid relationships that must never be parsed`),
-		"xl/sharedStrings.xml":                []byte(`<sst/>`),
-		"xl/styles.xml":                       []byte(`<styleSheet/>`),
+		"xl/sharedStrings.xml":                []byte(`<sst><si><t>共享文本</t></si></sst>`),
+		"xl/styles.xml":                       []byte(`<styleSheet><numFmts><numFmt numFmtId="164" formatCode="0.0%"/></numFmts><cellXfs><xf numFmtId="0"/><xf numFmtId="164"/></cellXfs></styleSheet>`),
 	}
 }
 
@@ -28,41 +26,18 @@ func TestFirstWorksheetSkipsLaterPayloadsAndPreservesSharedParts(t *testing.T) {
 			parts["xl/workbook.xml"] = utf16XML(string(parts["xl/workbook.xml"]), true)
 		}
 		original := workbookZIP(t, parts)
-		prepared, err := prepareArchive(original, true, sheetSelection{})
+		sheets, _, err := readNativeWorkbook(original, sheetSelection{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		archive, err := zip.NewReader(bytes.NewReader(prepared), int64(len(prepared)))
-		if err != nil {
-			t.Fatal(err)
+		if len(sheets) != 1 || sheets[0].Name != "Hidden first" {
+			t.Fatalf("wrong worksheet selected: %+v", sheets)
 		}
-		seen := make(map[string]bool)
-		for _, part := range archive.File {
-			if strings.Contains(part.Name, "sheet1.xml") {
-				t.Fatal("unused sheet remained in the browser snapshot")
-			}
-			seen[part.Name] = true
-			r, err := part.Open()
-			if err != nil {
-				t.Fatal(err)
-			}
-			content, err := io.ReadAll(r)
-			r.Close()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if part.Name == "xl/worksheets/sheet7.xml" {
-				if !bytes.Contains(content, []byte(`<v>42</v>`)) {
-					t.Fatal("cached formula value lost")
-				}
-			} else if !bytes.Equal(content, parts[part.Name]) {
-				t.Fatal("shared metadata changed", part.Name)
-			}
+		if !reflect.DeepEqual(sheets[0].Values, [][]string{{"42", "共享文本", "25.0%"}}) {
+			t.Fatal("cached value/shared strings/styles lost", sheets[0].Values)
 		}
-		for _, name := range []string{"xl/worksheets/sheet7.xml", "xl/worksheets/_rels/sheet7.xml.rels", "xl/sharedStrings.xml", "xl/styles.xml"} {
-			if !seen[name] {
-				t.Fatal("required part missing", name)
-			}
+		if !reflect.DeepEqual(sheets[0].Metadata[0], []cellMetadata{{Type: "number", Raw: 42.0}, {Type: "string", Raw: "共享文本"}, {Type: "number", Raw: 0.25}}) {
+			t.Fatal("raw cached-value metadata changed", sheets[0].Metadata)
 		}
 	}
 }
@@ -70,6 +45,7 @@ func TestFirstWorksheetSkipsLaterPayloadsAndPreservesSharedParts(t *testing.T) {
 func TestFirstWorksheetStillRejectsInvalidSelectedDataAndRelationships(t *testing.T) {
 	for _, change := range []func(map[string][]byte){
 		func(p map[string][]byte) { p["xl/worksheets/sheet7.xml"] = []byte(`<worksheet><broken></worksheet>`) },
+		func(p map[string][]byte) { p["xl/worksheets/_rels/sheet7.xml.rels"] = []byte(`<broken>`) },
 		func(p map[string][]byte) { delete(p, "xl/worksheets/sheet7.xml") },
 		func(p map[string][]byte) { delete(p, "xl/_rels/workbook.xml.rels") },
 		func(p map[string][]byte) {
@@ -84,7 +60,7 @@ func TestFirstWorksheetStillRejectsInvalidSelectedDataAndRelationships(t *testin
 	} {
 		parts := firstSheetFixture()
 		change(parts)
-		if _, err := prepareArchive(workbookZIP(t, parts), true, sheetSelection{}); err == nil {
+		if _, _, err := readNativeWorkbook(workbookZIP(t, parts), sheetSelection{}); err == nil {
 			t.Fatal("invalid first sheet accepted")
 		}
 	}
@@ -100,13 +76,13 @@ func TestFirstWorksheetAcceptsStrictAndInternalRelationships(t *testing.T) {
 				parts[name] = bytes.ReplaceAll(parts[name], []byte(relationshipNS), []byte(strictRelationshipNS))
 			}
 		}
-		if _, err := prepareArchive(workbookZIP(t, parts), true, sheetSelection{}); err != nil {
+		if _, _, err := readNativeWorkbook(workbookZIP(t, parts), sheetSelection{}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	parts := firstSheetFixture()
 	parts["xl/workbook.xml"] = bytes.Replace(parts["xl/workbook.xml"], []byte(`<sheet name=`), []byte(`<sheet xmlns="urn:unknown" name=`), 1)
-	if _, err := prepareArchive(workbookZIP(t, parts), true, sheetSelection{}); err == nil {
+	if _, _, err := readNativeWorkbook(workbookZIP(t, parts), sheetSelection{}); err == nil {
 		t.Fatal("unknown first sheet namespace skipped")
 	}
 }
@@ -119,48 +95,37 @@ func TestArchiveConfigurableWorksheetSelection(t *testing.T) {
 	original := workbookZIP(t, parts)
 	for _, item := range []struct {
 		selection sheetSelection
-		paths     []string
+		names     []string
 	}{
-		{sheetSelection{}, []string{"xl/worksheets/sheet7.xml"}},
-		{sheetSelection{Mode: "all"}, []string{"xl/worksheets/sheet7.xml", "xl/worksheets/sheet1.xml"}},
-		{sheetSelection{Mode: "named", Names: []string{"Other"}}, []string{"xl/worksheets/sheet1.xml"}},
-		{sheetSelection{Mode: "named", Names: []string{"Other", "Hidden first", "Other"}}, []string{"xl/worksheets/sheet7.xml", "xl/worksheets/sheet1.xml"}},
-		{sheetSelection{Mode: "named", Names: []string{"missing"}}, nil},
+		{sheetSelection{}, []string{"Hidden first"}},
+		{sheetSelection{Mode: "all"}, []string{"Hidden first", "Other"}},
+		{sheetSelection{Mode: "named", Names: []string{"Other"}}, []string{"Other"}},
+		{sheetSelection{Mode: "named", Names: []string{"Other", "Hidden first", "Other"}}, []string{"Hidden first", "Other"}},
+		{sheetSelection{Mode: "named", Names: []string{"missing"}}, []string{}},
 	} {
-		prepared, err := prepareArchive(original, true, item.selection)
+		sheets, _, err := readNativeWorkbook(original, item.selection)
 		if err != nil {
 			t.Fatal(err)
 		}
-		archive, err := zip.NewReader(bytes.NewReader(prepared), int64(len(prepared)))
-		if err != nil {
-			t.Fatal(err)
+		names := make([]string, len(sheets))
+		for i, sheet := range sheets {
+			names[i] = sheet.Name
 		}
-		seen := make(map[string]bool)
-		for _, part := range archive.File {
-			if strings.HasPrefix(part.Name, "xl/worksheets/") && strings.HasSuffix(part.Name, ".xml") {
-				seen[part.Name] = true
-			}
-		}
-		if len(seen) != len(item.paths) {
-			t.Fatalf("selection %+v: %v", item.selection, seen)
-		}
-		for _, name := range item.paths {
-			if !seen[name] {
-				t.Fatal("missing selected sheet", name)
-			}
+		if !reflect.DeepEqual(names, item.names) {
+			t.Fatalf("selection %+v: %v, want %v", item.selection, names, item.names)
 		}
 	}
 	bad := workbookZIP(t, firstSheetFixture())
-	if _, err := prepareArchive(bad, true, sheetSelection{Mode: "named", Names: []string{"Hidden first"}}); err != nil {
+	if _, _, err := readNativeWorkbook(bad, sheetSelection{Mode: "named", Names: []string{"Hidden first"}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, selection := range []sheetSelection{{Mode: "all"}, {Mode: "named", Names: []string{"Other"}}} {
-		if _, err := prepareArchive(bad, true, selection); err == nil {
+		if _, _, err := readNativeWorkbook(bad, selection); err == nil {
 			t.Fatal("selected damaged sheet accepted", selection)
 		}
 	}
 	parts["xl/workbook.xml"] = append([]byte(`<!DOCTYPE workbook>`), parts["xl/workbook.xml"]...)
-	if _, err := prepareArchive(workbookZIP(t, parts), true, sheetSelection{Mode: "all"}); err == nil {
+	if _, _, err := readNativeWorkbook(workbookZIP(t, parts), sheetSelection{Mode: "all"}); err == nil {
 		t.Fatal("all mode skipped metadata validation")
 	}
 }

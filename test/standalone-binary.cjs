@@ -34,12 +34,15 @@ async function main() {
       const payload = await (await fetch(url + 'snapshot')).json();
       assert.equal(payload.error || '', '');
       assert.equal(payload.xlsx, xlsx);
-      assert.equal(payload.inputs.length, 2);
+      assert.equal(Object.hasOwn(payload, 'inputs'), false, 'source data must stay in Go');
       const worker = await fetch(url + 'worker.js');
-      assert.equal(worker.status, 200);
-      assert.equal(worker.headers.get('content-encoding'), 'gzip');
-      await page.goto(url);
+      assert.equal(worker.status, 404, 'native executable no longer ships a browser parser');
+      const script = await fetch(url + 'browser.js');
+      assert.equal(script.status, 200); assert.equal(script.headers.get('content-encoding'), 'gzip');
+      await page.goto(url + '#profile=1');
       await page.locator('tr.modified').waitFor();
+      assert.equal(await page.evaluate(() => window.gridiffPerf.result.workers), 0);
+      assert.equal(await page.evaluate(() => window.gridiffPerf.result.native), true);
       if (xlsx) {
         assert.deepEqual(await page.locator('#sheet option').evaluateAll(options => options.map(option => option.value)), ['Data']);
         assert.equal(await page.locator('td.changed .before > :last-child').innerText(), '4');
@@ -72,10 +75,10 @@ async function main() {
     const license = spawnSync(binary, ['--licenses'], { cwd: temporary, env: environment, encoding: 'utf8' });
     assert.equal(license.status, 0, license.stderr);
     assert.ok(license.stdout.includes('Go standard library'));
-    assert.ok(license.stdout.includes('exceljs@4.4.0'));
+    assert.ok(!license.stdout.includes('exceljs@4.4.0'));
     assert.ok(!license.stdout.includes('Bun runtime'));
     assert.deepEqual(errors, []);
-    console.log('Standalone binary passed: no external runtime, gzip assets/licenses, CSV/XLSX browser computation after deleting inputs, formulas, system theme and shutdown.');
+    console.log('Standalone binary passed: no external runtime or browser parser, gzip assets/licenses, CSV/XLSX native computation after deleting inputs, formulas, system theme and shutdown.');
   } finally { await browser.close(); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

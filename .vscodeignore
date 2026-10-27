@@ -16,7 +16,6 @@ scripts/**
 cli/**
 launchers/**
 media/browser.js
-media/worker-entry.js
 media/themes.js
 media/themes.css
 dist/**

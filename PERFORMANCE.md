@@ -401,3 +401,52 @@ Go 加整个隔离 Chrome 进程树的峰值 footprint，从本轮对照最大 1
 五个平台重建并同步到 design/gridiff；分发清单全部哈希及统一入口的默认/指定模式已实测，详见 [分发验证](dist/sheet-selection/distribution.json)。macOS ARM64 程序为 7,288,688 B，SHA-256 `2f3d3fad134a629a1f49018b30c0f3b1a6595d02cd591aa08cc4dad9bb8bbd65`；构建输入 `06ba4c29e45e7b424f50aeb1edda6e9eefa66be08ae4a0278ea78c960b50cf92`。插件包位于 `dist/sheet-selection/gridiff-0.1.14.vsix`，版本未增加，未替换已安装插件或发布到市场。
 
 本轮尚未实施独立程序的全部计算迁移到 Go；仍为 Go 预处理与双 Worker 比较。Windows/Linux 只完成交叉构建，没有在实机或 M1/8 GB 上运行。源工程 main 的 HEAD 仍为 `10e7c73773f6802026563c4b1cccfe86f45de650`，design 为 develop；全部修改保留未提交，未推送。
+
+## 第八轮：独立程序原生 Go 计算（2026-10-28）
+
+迁移后的独立程序在 Go 中完成 CSV/XLSX 读取、工作表选择、表头转换、主键对齐、差异计算、全表搜索、变动字段并集与分页。双侧并行解析后缓存原生模型；浏览器只接收当前页、可见字段及统计与记录名称。`snapshot` 不再携带原始输入，`compare` 返回投影结果，内部匹配 key 不出现在网络响应。删除旧 Worker、Base64、中间 ZIP 重写和公式压缩链路，XML 校验与原生值读取共用一次遍历。CDATA 继续保持插件的处理语义，校验仍覆盖原始 token。
+
+插件保持独立 JS/ExcelJS/SSF 比较，不依赖本地 Go 服务。两套引擎通过差分样例核对；共用页面和展示协议。first/all/named 范围、Fork 默认双路径、同页复用、主题与公式缓存语义保持一致。Go 必须取得双侧完整内存快照后才返回，Fork 删除临时输入不影响后续操作。
+
+### 实际大型样本表对照
+
+同一 `sample-large.xlsx`，输入摘要与前轮一致。旧程序为迁移前固定保留的可配置 Worker 版本 `2f3d3fad134a629a1f49018b30c0f3b1a6595d02cd591aa08cc4dad9bb8bbd65`；新程序为本轮最终构建。两者均默认首表、双侧并行，按行号对齐，显示全部记录和字段，三次交替运行。
+
+| 指标 | 旧 Worker 计算 | 原生 Go 计算 | 降低 |
+| --- | ---: | ---: | ---: |
+| 首次提交至首帧中位数 | 957 ms | 388 ms | 59.5% |
+| 同页再次比较中位数 | 674 ms | 342 ms | 49.3% |
+| Go 加整个隔离 Chrome 峰值 footprint | 1092 MiB | 819 MiB | 25.0% |
+| 每次比较 API 响应体字节中位数 | 5,616,228 B | 519,723 B | 90.7% |
+
+首帧使用两次 requestAnimationFrame，统计从 CLI 提交到呈现代理时刻；Chrome 和空白页在计时前创建，不含 OS 启动浏览器、创建空页和 Fork GUI 时间。API 字节只统计 snapshot/compare 的响应体，不包含静态资源、请求头或传输协议开销；本地 HTTP 无 TLS。阶段有嵌套，不能相加；Go 准备阶段现在包含原先在浏览器内执行的解析与默认比较，不能直接与旧 Go 验证阶段相除作为解析速度。
+
+Go 解析器完整规范化后的 3824 条记录、39 页，与独立插件模型逐页 deep equality 一致，包含值、类型、格式、记录顺序、字段及汇总；源文件未变。内存口径包括 Go 与隔离 Chrome 的完整进程树，RSS 含共享页重复计数，不作为独占内存。硬件仍为 M4 Pro 24 GiB，没有在 M1/8 GiB 上实机验证。
+
+原始报告：[实际程序对照](dist/native-go/actual-1793122998588.json)、[完整大型样本表等价](dist/native-go/equip-parity.json)。复现脚本 `dist/native-go/measure.cjs`、`equip-parity.cjs`；旧程序及其 receipt 保存在 `dist/native-go/gridiff-before`。测量脚本通过 agent-tmp-run 执行，先将 `dist/parallel-memory/sample.c` 编译到 `$CODEX_AGENT_TMP/sample`。
+
+### 其他样本与格式瓶颈
+
+13 类合成表均通过行列数、增删修改、移动、搜索、分页及复用检查。以下是各一次烟测，外层耗时包含 Playwright 驱动、新上下文和空页准备，不是稳定性能中位数；浏览器进程启动单独记录在报告中。
+
+| 样本 | 旧版首次总耗时 | 新版首次总耗时 | 旧版暖替换 | 新版暖替换 |
+| --- | ---: | ---: | ---: | ---: |
+| CSV 50000×8 | 540 ms | 460 ms | 152 ms | 118 ms |
+| CSV 1000×400 | 586 ms | 420 ms | 135 ms | 84 ms |
+| XLSX 5000×20，含类型/日期/缓存公式 | 886 ms | 557 ms | 483 ms | 204 ms |
+| XLSX 8 张 1000×20，默认只读首表 | 735 ms | 389 ms | 221 ms | 88 ms |
+| XLSX 稀疏区域 5000×40 | 622 ms | 478 ms | 254 ms | 104 ms |
+
+小 CSV 的首次总耗时为 625→629 ms，暖替换均约 47 ms；增删 CSV 的单次暖替换为 113→122 ms。小样本和交互外层耗时仍有波动，不宣称所有操作都加速。完整 [旧版矩阵](dist/perf/baseline-2026-10-27T17-36-02-437Z.json) 和 [新版矩阵](dist/perf/baseline-2026-10-27T17-42-59-982Z.json) 包含全部 13 类及阶段明细。
+
+首次原生矩阵发现大量日期格式化成本偏高。常见数字格式使用原生快速路径，其他格式使用 Excelize 格式化器；现在为每侧工作簿缓存最多 1024 个重复的特殊格式/数值结果，避免每个日期重新修改临时格式化模型。缓存前该 XLSX 样本 Go 启动准备约 466 ms，缓存后约 162 ms；这些定位数据各一次，不能代替稳定基准。[缓存前原生矩阵](dist/perf/baseline-2026-10-27T17-36-56-308Z.json)。
+
+### 验证和交付
+
+98 项 Node 单元测试、语法检查、Go 全套与 race 测试通过；旧 Worker 专用测试由原生比较及 HTTP 队列测试替代。Go 表格引擎与 JS 差分测试覆盖表头、复合/类型主键、空键、删除锚点、schema、顺序与全表视图；24 组真实 Go/插件等价场景覆盖 CSV/XLSX、格式、公式缓存、日期系统、sheet 和错误恢复。格式验证还包含 153 组工作簿值/格式组合、1152 组 SSF 数值格式组合及永久边界测试；不声称穷尽所有 Excel 自定义格式。
+
+实际 Chrome 回归验证交互、页签复用、sheet 配置、源文件删除、过期 generation、独立二进制、独立插件页面，以及五套明暗配色、系统主题跟随、保存失败和对比度。新增回归覆盖过期视图仍保留已完成的交换设置、隐藏字段不随无主键 fingerprint 传输、大量 sheet 不重复回传默认设置、比较接口与控制接口各自的请求体限制。
+
+五个平台重建并同步 design/gridiff，清单及统一入口实测见 [分发验证](dist/native-go/distribution.json)。macOS ARM64 程序为 9,241,408 B（8.81 MiB），下载包约 3.56 MiB；相比迁移前程序 6.95 MiB，增加的原生格式化代码换取完整 Go 处理。SHA-256 `7ff7b0d903964f794cc7d4db99b447aed328e49876f6f953cf02e777d6f80ca8`，构建输入 `1c7f1723f56f930ade1e9eabdb722c13977c17ef7ec21b5be139c887fbf679ce`。独立程序不再包含 ExcelJS 或浏览器解析器，构建也无需 Bun；Go 模块及 SSF 算法许可随程序分发。
+
+迁移前基线已本地提交：源码 main 的 `3446f29b7ac543c0a39fdbc0dfe444d271c0a29a`，design develop 的 `57d378e7c`。本轮制品基于上述源码基线含未提交改动构建，receipt 如实保留 `sourceDirty: true`，迁移源码由本节所在提交记录。构建仍标识为 0.1.14 的本地开发版本，不代表市场更新。独立插件包为 `dist/native-go/gridiff-0.1.14.vsix`，未安装或发布。仅 macOS ARM64 实机验证，其他平台及 M1/8 GiB 尚未实测。

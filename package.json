@@ -161,20 +161,20 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "test:ui": "node test/ui.cjs",
-    "check": "node --check src/extension.js && node --check src/csv.js && node --check src/diff.js && node --check src/webview.js && node --check media/main.js && node --check scripts/release.js && node --check src/xlsx.js && node --check src/git.js && node --check src/comparison.js && node --check src/page.js && node --check media/browser.js && node --check scripts/build-cli.js && node --check src/xlsx-core.js && node --check src/xlsx-sheets.js && node --check media/themes.js && node --check media/worker-entry.js && node --check scripts/sync-project.js && node --check scripts/benchmark.cjs && node --check media/view.js && node --check src/sheets.js",
+    "check": "node --check src/extension.js && node --check src/csv.js && node --check src/diff.js && node --check src/webview.js && node --check media/main.js && node --check scripts/release.js && node --check src/xlsx.js && node --check src/git.js && node --check src/comparison.js && node --check src/page.js && node --check media/browser.js && node --check scripts/build-cli.js && node --check src/xlsx-core.js && node --check src/xlsx-sheets.js && node --check media/themes.js && node --check scripts/sync-project.js && node --check scripts/benchmark.cjs && node --check media/view.js && node --check src/sheets.js",
     "package": "vsce package -o dist/",
     "release": "node scripts/release.js",
-    "build:cli": "bun scripts/build-cli.js",
+    "build:cli": "node scripts/build-cli.js",
     "test:browser": "node test/browser-ui.cjs",
     "test:binary": "node test/standalone-binary.cjs",
     "test:themes": "node test/themes.cjs",
-    "test:worker": "node test/browser-compute.cjs",
     "test:go": "cd cli && go test ./...",
     "sync:project": "node scripts/sync-project.js",
     "benchmark": "node scripts/benchmark.cjs",
     "test:reuse": "node test/browser-reuse.cjs",
     "test:xlsx-snapshot": "node test/xlsx-snapshot.cjs",
-    "test:sheets": "node test/sheet-selection.cjs"
+    "test:sheets": "node test/sheet-selection.cjs",
+    "test:native": "node test/native-parity.cjs"
   },
   "devDependencies": {
     "@vscode/vsce": "^3.6.0",

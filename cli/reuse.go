@@ -184,7 +184,7 @@ func (s *comparisonServer) submit(w http.ResponseWriter, r *http.Request) {
 		failHTTP(w, 403, "仅允许本机 Gridiff 命令提交比较")
 		return
 	}
-	object, err := readObject(w, r)
+	object, err := readObject(w, r, 65536)
 	if err != nil {
 		failHTTP(w, 400, err.Error())
 		return

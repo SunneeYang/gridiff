@@ -116,7 +116,7 @@ async function main() {
     const start = performance.now(); await operation(); await settled(page);
     const measured = { wallMs: performance.now() - start, ...await collect(page) };
     assert.equal(await page.locator('#error').isVisible(), false);
-    if (recompute) assert.ok(measured.result.request > previous, 'Operation must produce a fresh worker result');
+    if (recompute) assert.ok(measured.result.request > previous, 'Operation must produce a fresh comparison result');
     return measured;
   }
   try {
@@ -147,7 +147,7 @@ async function main() {
           const load = { wallMs: performance.now() - navigation, ...await collect(page) };
           validate(load.result, fixture.expected, name);
           assert.ok(load.events.some(event => event.phase === 'server.snapshot'));
-          assert.ok(load.events.some(event => event.phase === 'table.compare'));
+          assert.ok(load.events.some(event => ['table.compare', 'native.compute'].includes(event.phase)));
           const operations = {}, warmReplacements = [];
           const firstChangedValues = () => page.locator('tbody td.changed').first().evaluate(cell =>
             ['before', 'after'].map(side => cell.querySelector('.value-line.' + side + ' > :last-child').textContent));
@@ -166,7 +166,7 @@ async function main() {
               const measured = { wallMs: performance.now() - replaceStart, acknowledgedMs, ...await collect(page) };
               assert.equal(url, server.url); assert.equal(page.url(), server.url + '#profile=1');
               assert.equal(await page.evaluate(() => window.benchmarkDocument), 'same-document');
-              assert.equal(measured.result.workers, 1); validate(measured.result, fixture.expected, name);
+              assert.equal(measured.result.workers, measured.result.native ? 0 : 1); validate(measured.result, fixture.expected, name);
               if (originalValues) assert.deepEqual(await firstChangedValues(), cycle % 2 ? originalValues : [...originalValues].reverse(), name + ' replacement values');
               assert.ok((await page.locator('#title').innerText()).includes(`warm-${repeat}-${cycle}`));
               if (cycles > 1) measured.retained = await retainedMainHeap(page);

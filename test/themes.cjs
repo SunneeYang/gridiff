@@ -2,56 +2,32 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const http = require('node:http');
 const { chromium } = require('playwright');
-const { pageHTML } = require('../src/page');
-const { readTable } = require('../src/csv');
-const { compareTables } = require('../src/diff');
+const { startComparisonServer } = require('./browser-server.cjs');
 
 const root = path.resolve(__dirname, '..');
 const palettes = ['default', 'github', 'catppuccin', 'solarized', 'nord'];
-const payload = { type: 'comparison', title: '主题预览.csv', sources: ['旧版本', '新版本'], readonlySnapshot: true,
-  options: { format: 'csv', keyColumns: ['id'] }, revision: 1, skipped: [0, 0],
-  result: compareTables(readTable('id,name,value\n1,生命药水,40\n2,旧制药剂,20\n3,修复材料,10'),
-    readTable('id,name,value\n1,生命药水,60\n3,修复材料,10\n4,复苏药剂,150')) };
 let saved = { mode: 'system', palette: 'default' }, failSave = false;
-function server() {
-  return http.createServer(async (request, response) => {
-    response.setHeader('Cache-Control', 'no-store');
-    if (request.url.endsWith('/preferences')) {
-      if (request.method === 'POST') {
-        let body = ''; for await (const chunk of request) body += chunk;
-        if (failSave) { response.writeHead(500); response.end('{}'); return; }
-        saved = JSON.parse(body);
-      }
-      response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify(saved)); return;
-    }
-    const name = request.url.split('/').at(-1);
-    if (!name) {
-      response.setHeader('Content-Type', 'text/html');
-      response.end(pageHTML({ resource: asset => asset, browser: true,
-        csp: "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'" }));
-    } else if (name === 'browser.js') {
-      response.setHeader('Content-Type', 'text/javascript');
-      response.end(`window.gridiffHost={getState:()=>({onlyChanges:false,onlyFields:false}),setState:()=>{},postMessage:m=>{if(m.action==='ready')setTimeout(()=>window.dispatchEvent(new MessageEvent('message',{data:${JSON.stringify(payload)}})),0)}};`);
-    } else if (['main.js', 'main.css', 'themes.js', 'themes.css'].includes(name)) {
-      response.setHeader('Content-Type', name.endsWith('.css') ? 'text/css' : 'text/javascript');
-      response.end(fs.readFileSync(path.join(root, 'media', name)));
-    } else { response.writeHead(404); response.end(); }
-  });
-}
-const listen = instance => new Promise(resolve => instance.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${instance.address().port}/s/example/`)));
-const close = instance => new Promise(resolve => { instance.close(resolve); instance.closeAllConnections(); });
 
 (async () => {
   assert.ok(process.env.CODEX_AGENT_TMP, 'Run with agent-tmp-run');
-  const first = server(), second = server();
-  const urls = await Promise.all([listen(first), listen(second)]);
+  const files = ['theme-old.csv', 'theme-new.csv'].map(name => path.join(process.env.CODEX_AGENT_TMP, name));
+  fs.writeFileSync(files[0], 'id,name,value\n1,生命药水,40\n2,旧制药剂,20\n3,修复材料,10');
+  fs.writeFileSync(files[1], 'id,name,value\n1,生命药水,60\n3,修复材料,10\n4,复苏药剂,150');
+  const servers = await Promise.all([startComparisonServer({ files }), startComparisonServer({ files })]);
+  const urls = servers.map(server => server.url);
   const browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'chrome' });
   const errors = [];
   try {
     const page = await browser.newPage({ viewport: { width: 1360, height: 1000 }, colorScheme: 'dark' });
     page.on('pageerror', error => errors.push(error.message));
+    await page.route('**/preferences', async route => {
+      if (route.request().method() === 'POST') {
+        if (failSave) { await route.fulfill({ status: 500, contentType: 'application/json', body: '{}' }); return; }
+        saved = route.request().postDataJSON();
+      }
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(saved) });
+    });
     await page.goto(urls[0]);
     await page.locator('tbody tr').first().waitFor();
     assert.equal(await page.locator('html').getAttribute('data-appearance'), 'dark');
@@ -114,6 +90,6 @@ const close = instance => new Promise(resolve => { instance.close(resolve); inst
     console.log('Themes passed: live OS changes, manual overrides, cross-port preferences, reload, five light/dark palettes, 4.5:1 text contrast, responsive layout and save errors.');
   } finally {
     await browser.close();
-    await Promise.all([close(first), close(second)]);
+    await Promise.all(servers.map(server => server.close()));
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });

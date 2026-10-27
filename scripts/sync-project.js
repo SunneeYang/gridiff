@@ -79,7 +79,7 @@ function prepare(root, project) {
 版本：${packageFile.version}。${sourceState}。
 来源提交：${provenance.sourceCommit || '未知'}。各平台 SHA-256、构建来源与许可见 manifest.json 和 LICENSES.txt。
 
-无需单独下载程序，也不需要安装 Node.js、Bun、Go、Mova 或 VS Code。程序已随此目录提供，网页由程序在本机提供，比较数据只保存在内存。
+无需单独下载程序，也不需要安装 Node.js、Bun、Go、Mova 或 VS Code。程序已随此目录提供，网页由程序在本机提供；Go 完成解析、比较、搜索和分页，浏览器只接收当前页及可见字段，比较数据只保存在内存。
 
 ## Fork 配置
 
@@ -96,7 +96,7 @@ XLSX 默认只读首表（含隐藏首表），两侧按位置配对。可用 \`
 
 Unix 入口自动选择 macOS/Linux 的 ARM64 或 x64 程序。Windows 目前提供 x64；ARM64 入口会明确提示未提供原生版本，不会静默选择错误程序。
 
-命令行也可运行 \`./gridiff "旧版本.csv" "新版本.csv"\`，支持 CSV 和 XLSX。默认读取完整快照后返回，Fork 随后清理临时文件不影响页面。后续比较复用服务、页签和 Worker，替换当前内容；页签是否自动切到前台取决于系统与浏览器。需要独立比较并等待审阅时加 \`--wait\`，并在网页点击“结束比较”。
+命令行也可运行 \`./gridiff "旧版本.csv" "新版本.csv"\`，支持 CSV 和 XLSX。默认读取完整快照后返回，Fork 随后清理临时文件不影响页面。后续比较复用服务和页签，替换当前内容；页签是否自动切到前台取决于系统与浏览器。需要独立比较并等待审阅时加 \`--wait\`，并在网页点击“结束比较”。
 
 程序文件由 Git LFS 跟踪。如果只取到 LFS 指针，入口会提示在策划仓库运行 \`git lfs pull\`，不会自行下载或改权限。若 Unix 程序权限丢失，按入口提示恢复执行权限。
 

@@ -5,8 +5,15 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { chromium } = require('playwright');
 const { workbook, rewriteZip } = require('./xlsx-fixtures');
-const { readWorkbook } = require('../src/xlsx');
 const { startComparisonServer, submitComparison } = require('./browser-server.cjs');
+
+async function comparison(url, metadata) {
+  const response = await fetch(url + 'compare', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: 1, action: 'load', generation: metadata.generation,
+      view: { view: 'grid', onlyChanges: false, onlyFields: false, query: '', page: 0 } }) });
+  assert.equal(response.status, 200);
+  const body = await response.json(); assert.equal(body.error, undefined); return body.data;
+}
 
 (async () => {
   assert.ok(process.env.CODEX_AGENT_TMP, 'Run through agent-tmp-run');
@@ -28,6 +35,7 @@ const { startComparisonServer, submitComparison } = require('./browser-server.cj
       if (url) assert.equal(current, url, 'loading range must not create another server');
       else { url = current; await page.goto(url + '#profile=1'); await page.evaluate(() => { window.selectionMarker = 42; }); }
       const snapshot = await (await fetch(url + 'snapshot')).json();
+      assert.equal(Object.hasOwn(snapshot, 'inputs'), false, 'browser receives metadata, not the workbook');
       await page.waitForFunction(generation => window.gridiffPerf?.result?.generation === generation, snapshot.generation);
       assert.equal(await page.evaluate(() => window.selectionMarker), 42, 'reuse keeps the document');
       return snapshot;
@@ -35,6 +43,8 @@ const { startComparisonServer, submitComparison } = require('./browser-server.cj
     const names = () => page.locator('#sheet option').evaluateAll(options => options.map(option => option.value));
     let snapshot = await submit([]);
     assert.equal(snapshot.sheetSelection.mode, 'first');
+    assert.equal(await page.evaluate(() => window.gridiffPerf.result.workers), 0);
+    assert.equal(await page.evaluate(() => window.gridiffPerf.result.native), true);
     assert.deepEqual(await names(), ['Renamed']);
     await page.locator('tbody tr.modified').waitFor();
     assert.match(await page.locator('#notice').innerText(), /首个工作表/);
@@ -47,7 +57,9 @@ const { startComparisonServer, submitComparison } = require('./browser-server.cj
     snapshot = await submit(['--sheet', '中文, table', '--sheet', 'Added']);
     assert.deepEqual(snapshot.sheetSelection, { mode: 'named', names: ['中文, table', 'Added'] });
     assert.deepEqual(await names(), ['中文, table', 'Added']);
-    assert.deepEqual((await readWorkbook(Buffer.from(snapshot.inputs[0], 'base64'))).map(sheet => sheet.name), ['中文, table']);
+    const selected = await comparison(url, snapshot);
+    assert.deepEqual(selected.sheets.map(sheet => sheet.name), ['中文, table', 'Added']);
+    assert.equal(selected.sheets.find(sheet => sheet.name === 'Added').status, 'added');
     await page.locator('#sheet').selectOption('Added');
     await page.locator('tbody tr.added').waitFor();
     await page.getByRole('button', { name: '交换左右', exact: true }).click();
@@ -63,9 +75,14 @@ const { startComparisonServer, submitComparison } = require('./browser-server.cj
     urls.add(namedStartup);
     const named = await (await fetch(namedStartup + 'snapshot')).json();
     assert.deepEqual(named.sheetSelection, { mode: 'named', names: ['中文, table'] });
-    assert.deepEqual((await readWorkbook(Buffer.from(named.inputs[1], 'base64'))).map(sheet => sheet.name), ['中文, table']);
+    assert.equal(Object.hasOwn(named, 'inputs'), false);
+    assert.deepEqual((await comparison(namedStartup, named)).sheets.map(sheet => sheet.name), ['中文, table']);
     const waitServer = await startComparisonServer({ files, binary, args: ['--sheets', 'all'] });
-    try { const data = await (await fetch(waitServer.url + 'snapshot')).json(); assert.equal(data.sheetSelection.mode, 'all'); assert.equal((await readWorkbook(Buffer.from(data.inputs[1], 'base64'))).length, 3); }
+    try {
+      const data = await (await fetch(waitServer.url + 'snapshot')).json(); assert.equal(data.sheetSelection.mode, 'all');
+      assert.equal(Object.hasOwn(data, 'inputs'), false);
+      assert.deepEqual((await comparison(waitServer.url, data)).sheets.map(sheet => sheet.name), ['Renamed', '中文, table', 'Added', 'First', 'Gone']);
+    }
     finally { await waitServer.close(); }
     for (const args of [['--sheets'], ['--sheet'], ['--sheets', 'wrong'], ['--sheets', 'all', '--sheet', 'A'], ['--sheet', '', ...files]]) {
       const result = spawnSync(binary, args, { encoding: 'utf8', env: { ...process.env, GRIDIFF_RUNTIME_DIR: runtimeDirectory } });

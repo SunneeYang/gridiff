@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -77,10 +76,10 @@ func TestSnapshotSurvivesInputRemoval(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &data); err != nil {
 		t.Fatal(err)
 	}
-	if data.XLSX || data.Inputs[1] != "id,value\n001,new" || data.Title != "new $value.csv" {
+	if data.XLSX || data.Title != "new $value.csv" {
 		t.Fatalf("unexpected snapshot: %+v", data)
 	}
-	if len(data.Metrics) != 3 || data.Metrics[2].Phase != "server.snapshot" {
+	if len(data.Metrics) < 4 || data.Metrics[len(data.Metrics)-1].Phase != "server.snapshot" {
 		t.Fatal("missing snapshot phase measurements", data.Metrics)
 	}
 	for _, metric := range data.Metrics {
@@ -88,8 +87,18 @@ func TestSnapshotSurvivesInputRemoval(t *testing.T) {
 			t.Fatal("invalid phase measurement", metric)
 		}
 	}
-	if w.Header().Get("Cache-Control") != "no-store" || !strings.Contains(w.Header().Get("Content-Security-Policy"), "worker-src 'self'") {
+	if w.Header().Get("Cache-Control") != "no-store" || !strings.Contains(w.Header().Get("Content-Security-Policy"), "worker-src 'none'") {
 		t.Fatal("snapshot lacks browser security headers")
+	}
+	if bytes.Contains(w.Body.Bytes(), []byte(`"inputs"`)) || bytes.Contains(w.Body.Bytes(), []byte(`001,new`)) {
+		t.Fatal("source leaked in metadata")
+	}
+	compared := request(t, s, "POST", "compare", `{"action":"load","id":1,"generation":1,"view":{"onlyChanges":false,"onlyFields":false}}`, nil)
+	var response struct {
+		Data nativePayload `json:"data"`
+	}
+	if json.Unmarshal(compared.Body.Bytes(), &response) != nil || response.Data.Result == nil || *response.Data.Result.Rows[0].Cells[1].After != "new" {
+		t.Fatal("native result lost after source removal", compared.Body.String())
 	}
 	if _, err := os.Stat(s.configPath); !os.IsNotExist(err) {
 		t.Fatal("opening a comparison must not write preferences", err)
@@ -185,7 +194,7 @@ func TestCloseAndTimeout(t *testing.T) {
 func TestFileBoundaryAndEmptyWorkbookSide(t *testing.T) {
 	files := fixture(t, nil, workbookZIP(t, map[string][]byte{"xl/workbook.xml": []byte(`<workbook/>`)}), "xlsx")
 	data, err := makeSnapshot(files, sheetSelection{})
-	if err != nil || !data.XLSX || data.Error != "" || data.Inputs[0] != "" || data.Inputs[1] == "" {
+	if err != nil || !data.XLSX || data.Error != "" || data.native == nil {
 		t.Fatal(data, err)
 	}
 	if _, err := readSnapshot(filepath.Dir(files[0])); err == nil {
@@ -221,18 +230,19 @@ func TestParallelWorkbookSnapshotCompletesBothSidesBeforeReturning(t *testing.T)
 	if w.Code != 200 || data.Error != "" || !data.XLSX {
 		t.Fatal(w.Code, data.Error)
 	}
-	for i, original := range [][]byte{left, right} {
-		want, err := prepareArchive(original, true, sheetSelection{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if data.Inputs[i] != base64.StdEncoding.EncodeToString(want) {
-			t.Fatalf("side %d was incomplete or swapped", i)
+	for i, expected := range []string{"1", "2"} {
+		book := s.data.native.books[i]
+		if len(book) != 1 || len(book[0].Values) != 1 || book[0].Values[0][0] != expected {
+			t.Fatalf("side %d incomplete or swapped: %+v", i, book)
 		}
 	}
-	if len(data.Metrics) != 7 {
-		t.Fatal("missing measurements from one side", data.Metrics)
+	if bytes.Contains(w.Body.Bytes(), []byte(`"inputs"`)) {
+		t.Fatal("XLSX payload leaked to browser")
 	}
+	if len(data.Metrics) < 4 {
+		t.Fatal("missing measurements", data.Metrics)
+	}
+
 	for _, metric := range data.Metrics {
 		if metric.MS < 0 || metric.Bytes < 0 {
 			t.Fatal("invalid measurement", metric)
@@ -245,15 +255,15 @@ func TestParallelWorkbookFailureKeepsLeftPriorityAndClearsBothSides(t *testing.T
 	badXML := workbookZIP(t, map[string][]byte{"xl/workbook.xml": []byte(`<!DOCTYPE workbook><workbook/>`)})
 	badZIP := []byte("not a zip")
 	for _, pair := range [][2][]byte{{badXML, good}, {good, badZIP}, {badXML, badZIP}} {
-		_, expected := prepareArchive(pair[0], true, sheetSelection{})
+		_, _, expected := readNativeWorkbook(pair[0], sheetSelection{})
 		if expected == nil {
-			_, expected = prepareArchive(pair[1], true, sheetSelection{})
+			_, _, expected = readNativeWorkbook(pair[1], sheetSelection{})
 		}
 		data, err := makeSnapshot(fixture(t, pair[0], pair[1], "xlsx"), sheetSelection{})
 		if err != nil || data.Error != "无法读取 XLSX："+expected.Error() {
 			t.Fatal(data, err)
 		}
-		if data.Inputs[0] != "" || data.Inputs[1] != "" {
+		if len(data.native.books[0]) != 0 || len(data.native.books[1]) != 0 {
 			t.Fatal("partial snapshot survived validation failure")
 		}
 	}
@@ -278,7 +288,7 @@ func TestSnapshotRoutesOnlyByExtension(t *testing.T) {
 			if err != nil || !data.Unsupported || !strings.Contains(data.Error, ".csv") || !strings.Contains(data.Error, ".xlsx") {
 				t.Fatal(data, err)
 			}
-			if data.Title == "" || data.Inputs[0] != "" || data.Inputs[1] != "" || len(data.Metrics) != 1 || data.Metrics[0].Phase != "server.snapshot" {
+			if data.Title == "" || len(data.native.books[0]) != 0 || len(data.native.books[1]) != 0 || len(data.Metrics) != 1 || data.Metrics[0].Phase != "server.snapshot" {
 				t.Fatal("unsupported inputs must not be read", data)
 			}
 		})

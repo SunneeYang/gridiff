@@ -1,10 +1,7 @@
 package main
 
 import (
-	"archive/zip"
 	"bufio"
-	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -85,7 +82,7 @@ func TestEventsKeepOnePageCurrentAndSnapshotSurvivesRemoval(t *testing.T) {
 	if err := json.Unmarshal(request(t, s, "GET", "snapshot", "", nil).Body.Bytes(), &snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Generation != 2 || snapshot.Inputs[1] != "id,v\n2,new" {
+	if snapshot.Generation != 2 || s.data.native.csv[1][1][1] != "new" {
 		t.Fatal("new snapshot was not retained")
 	}
 	response.Body.Close()
@@ -205,26 +202,13 @@ func TestReuseCarriesPerSubmissionWorksheetRange(t *testing.T) {
 		if data.SheetSelection.Mode != selection.Mode {
 			t.Fatal("selection lost on reuse", data.SheetSelection)
 		}
-		raw, err := base64.StdEncoding.DecodeString(data.Inputs[0])
-		if err != nil {
-			t.Fatal(err)
-		}
-		z, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		count := 0
-		for _, entry := range z.File {
-			if strings.HasPrefix(entry.Name, "xl/worksheets/") && strings.HasSuffix(entry.Name, ".xml") {
-				count++
-			}
-		}
+		count := len(data.native.books[0])
 		want := 1
 		if selection.Mode == "all" {
 			want = 2
 		}
 		if count != want {
-			t.Fatal("wrong selected ZIP payload", count, want)
+			t.Fatal("wrong selected native workbook", count, want)
 		}
 	}
 	generation := s.generation

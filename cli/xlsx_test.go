@@ -9,6 +9,12 @@ import (
 	"unicode/utf16"
 )
 
+// All archive safety tests use the production native reader.
+func validateArchive(data []byte) error {
+	_, _, err := readNativeWorkbook(data, sheetSelection{Mode: "all"})
+	return err
+}
+
 func workbookZIP(t *testing.T, entries map[string][]byte) []byte {
 	t.Helper()
 	if string(entries["xl/workbook.xml"]) == `<workbook/>` && entries["xl/worksheets/sheet1.xml"] != nil {
@@ -57,7 +63,7 @@ func TestArchiveAllowsUTF8AndUTF16CustomXML(t *testing.T) {
 }
 
 func TestArchiveRejectsDTDInvalidEncodingAndCellCoordinates(t *testing.T) {
-	for _, data := range [][]byte{[]byte(`<!DOCTYPE x><custom/>`), utf16XML(`<!DOCTYPE x><custom/>`, false), utf16XML(`<!DOCTYPE x><custom/>`, true), append(utf16XML(`<custom/>`, false), 0), []byte{0xff, 0xfe, 0x00, 0xd8}, []byte(`<a/><b/>`)} {
+	for _, data := range [][]byte{[]byte(`<!DOCTYPE x><custom/>`), utf16XML(`<!DOCTYPE x><custom/>`, false), utf16XML(`<!DOCTYPE x><custom/>`, true), append(utf16XML(`<custom/>`, false), 0), []byte{0xff, 0xfe, 0x00, 0xd8}, []byte(`<a/><b/>`), []byte(`<?xml version="1.0" encoding="ISO-8859-1"?><custom/>`)} {
 		if err := validateArchive(workbookZIP(t, map[string][]byte{"xl/workbook.xml": []byte(`<workbook/>`), "customXml/item1.xml": data})); err == nil {
 			t.Fatalf("accepted bad XML: %x", data)
 		}
@@ -68,8 +74,34 @@ func TestArchiveRejectsDTDInvalidEncodingAndCellCoordinates(t *testing.T) {
 		}
 	}
 	rows, cells := maxCells, 0
-	if err := validateXML(strings.NewReader(`<sheet><row r="1"/></sheet>`), true, &rows, &cells); err == nil {
+	if err := scanXMLTokens(strings.NewReader(`<sheet><row r="1"/></sheet>`), true, &rows, &cells, nil); err == nil {
 		t.Fatal("row budget not enforced")
+	}
+	rows, cells = 0, maxCells
+	if err := scanXMLTokens(strings.NewReader(`<sheet><row r="1"><c r="A1"/></row></sheet>`), true, &rows, &cells, nil); err == nil {
+		t.Fatal("cell budget not enforced")
+	}
+	// Formula expressions are not evaluated or retained, but their XML remains validated.
+	for _, formula := range []string{`A1 &unknown; B1`, `A1</invalid>`, `<!DOCTYPE bad>`} {
+		worksheet := `<worksheet><sheetData><row r="1"><c r="A1"><f>` + formula + `</f><v>1</v></c></row></sheetData></worksheet>`
+		if err := validateArchive(workbookZIP(t, map[string][]byte{"xl/workbook.xml": []byte(`<workbook/>`), "xl/worksheets/sheet1.xml": []byte(worksheet)})); err == nil {
+			t.Fatal("invalid discarded formula XML accepted", formula)
+		}
+	}
+}
+
+func TestNativeArchiveRejectsUnsafePathsAndEncryption(t *testing.T) {
+	for _, name := range []string{"xl/worksheets/./sheet1.xml", "../escaped.xml", "/absolute.xml", `xl\worksheets\sheet1.xml`, "C:/drive.xml"} {
+		input := workbookZIP(t, map[string][]byte{"xl/workbook.xml": []byte(`<workbook/>`), name: []byte(`<worksheet/>`)})
+		if _, _, err := readNativeWorkbook(input, sheetSelection{Mode: "first"}); err == nil || !strings.Contains(err.Error(), "路径") {
+			t.Fatal("unsafe ZIP path accepted", name, err)
+		}
+	}
+	input := workbookZIP(t, map[string][]byte{"xl/workbook.xml": []byte(`<workbook/>`)})
+	central := bytes.Index(input, []byte{'P', 'K', 1, 2})
+	binary.LittleEndian.PutUint16(input[central+8:central+10], binary.LittleEndian.Uint16(input[central+8:central+10])|1)
+	if err := validateArchive(input); err == nil || !strings.Contains(err.Error(), "加密") {
+		t.Fatal("encrypted ZIP accepted", err)
 	}
 }
 

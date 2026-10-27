@@ -3,14 +3,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { workbook, rewriteZip } = require('./xlsx-fixtures');
+const { createComparison } = require('../src/comparison');
 const { readWorkbook } = require('../src/xlsx');
+const { selectView } = require('../media/view');
 const { startComparisonServer } = require('./browser-server.cjs');
 (async () => {
   assert.ok(process.env.CODEX_AGENT_TMP, 'Run through agent-tmp-run');
   const file = path.join(process.env.CODEX_AGENT_TMP, 'cached-values.xlsx');
   const long = 'SUM(A1:A20)+'.repeat(1000) + '0';
   for (const date1904 of [false, true]) {
-    let input = await workbook({ Data: [['id','value'],
+    let input = await workbook({ Data: [['id','value','c','d','e','f'],
       ['number', { formula: long, result: 2 }], ['zero', { formula: long, result: 0 }],
       ['boolean', { formula: long, result: false }], ['text', { formula: long, result: '文本' }],
       ['error', { formula: long, result: { error: '#DIV/0!' } }], ['missing', { formula: long }],
@@ -31,11 +33,26 @@ const { startComparisonServer } = require('./browser-server.cjs');
     try {
       const snapshot = await (await fetch(server.url + 'snapshot')).json();
       assert.equal(snapshot.error, undefined);
-      const compact = Buffer.from(snapshot.inputs[1], 'base64');
-      assert.ok(compact.length < original.length, 'formula-heavy snapshot must shrink');
-      assert.deepEqual(await readWorkbook(compact, { mode: 'first' }), await readWorkbook(original, { mode: 'first' }), 'cached values, types, ranges and date systems must match');
+      assert.equal(Object.hasOwn(snapshot, 'inputs'), false, 'raw XLSX must remain in Go');
+      const options = { format: 'auto', keyColumns: [], alignment: 'position' };
+      const view = { view: 'grid', onlyChanges: false, onlyFields: false, query: '', page: 0 };
+      const reference = createComparison({ xlsx: true, options, workbookReader: readWorkbook });
+      await reference.load([Buffer.alloc(0), original], { mode: 'first' });
+      const expected = reference.snapshot(); assert.equal(expected.error, '');
+      const selected = selectView(expected.result, view);
+      const response = await fetch(server.url + 'compare', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: 1, action: 'load', generation: snapshot.generation, view, settings: { options } }) });
+      assert.equal(response.status, 200);
+      const { data } = await response.json(); assert.equal(data.error, '');
+      const result = { ...data.result, rows: data.result.rows.map(({ displayName, schemaChanged, ...row }) => row) };
+      assert.deepEqual(result, { ...expected.result, rows: selected.rows.map(({key,...row})=>row) }, 'cached values, types, ranges and date systems must match');
+      assert.deepEqual(data.pageInfo, selected.pageInfo);
+      assert.deepEqual(data.skipped, expected.skipped);
+      assert.deepEqual(data.keyFields, expected.keyFields);
+      assert.deepEqual(data.sheets, expected.sheets);
+      assert.doesNotMatch(JSON.stringify(data), /SUM\(A1:A20\)/, 'formula text is never sent to the browser');
       assert.deepEqual(await fs.readFile(file), original, 'source remains untouched');
     } finally { await server.close(); }
   }
-  console.log('XLSX snapshots preserve cached values/types, dates, styles, shared/array formulas and missing caches; source bytes unchanged.');
+  console.log('Native XLSX preserves cached values/types, dates, styles, shared/array formulas, CDATA and missing caches; no raw workbook transfer and source bytes unchanged.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -24,32 +24,19 @@ function buildInputsHash(directory) {
   return digest.digest('hex');
 }
 
-function packageDirectories(inputs, root) {
-  const directories = new Set();
-  for (const file of inputs) {
-    const normalized = file.replaceAll('\\', '/'), offset = normalized.lastIndexOf('node_modules/');
-    if (offset < 0) continue;
-    const parts = normalized.slice(offset + 13).split('/');
-    directories.add(path.resolve(root, normalized.slice(0, offset + 13), ...parts.slice(0, parts[0].startsWith('@') ? 2 : 1)));
-  }
-  return [...directories].sort();
-}
-function collectNotices(directories, root, goLicense) {
+function collectNotices(dependencies, root, goLicense) {
   const sections = [
     `Gridiff\nSource: https://github.com/SunneeYang/gridiff\n\n${fs.readFileSync(path.join(root, 'LICENSE'), 'utf8')}`,
-    fs.readFileSync(path.join(root, 'THIRD_PARTY_NOTICES.md'), 'utf8'),
-    fs.readFileSync(path.join(root, 'THIRD_PARTY_NOTICES_BROWSER.txt'), 'utf8'),
-    `Go standard library and runtime\nSource: https://go.dev/\n${goLicense}`
+    `Go standard library and runtime\nSource: https://go.dev/\n${goLicense}`,
+    `SSF General number formatting algorithm (Apache-2.0)\nSource: https://github.com/SheetJS/ssf\n${fs.readFileSync(path.join(root, 'node_modules/ssf/LICENSE'), 'utf8')}`
   ];
   const seen = new Set();
-  for (const directory of directories) {
-    const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8'));
-    const id = `${manifest.name}@${manifest.version}`;
+  for (const { id, directory } of dependencies) {
     if (seen.has(id)) continue;
     seen.add(id);
-    const files = fs.readdirSync(directory).filter(name => /^(licen[sc]e|copying|notice)(\.|$)/i.test(name) && fs.statSync(path.join(directory, name)).isFile());
-    if (!files.length && !['saxes', 'isarray'].includes(manifest.name)) throw new Error(`缺少依赖许可证：${id}`);
-    sections.push(`${id}\nLicense: ${manifest.license || 'See bundled notices'}\n` + files.sort().map(name => `${name}\n${fs.readFileSync(path.join(directory, name), 'utf8')}`).join('\n'));
+    const files = fs.readdirSync(directory).filter(name => /^(licen[sc]e|copying|notice|patents)(\.|$)/i.test(name) && fs.statSync(path.join(directory, name)).isFile());
+    if (!files.length) throw new Error(`缺少依赖许可证：${id}`);
+    sections.push(`${id}\n` + files.sort().map(name => `${name}\n${fs.readFileSync(path.join(directory, name), 'utf8')}`).join('\n'));
   }
   return sections.join('\n\n' + '='.repeat(72) + '\n\n') + '\n';
 }
@@ -59,8 +46,7 @@ function run(command, args, options = {}) {
 }
 async function build(args, { root = path.resolve(__dirname, '..'), log = console.log } = {}) {
   const { values } = parseArgs({ args, options: { target: { type: 'string' }, all: { type: 'boolean' }, help: { type: 'boolean' } } });
-  if (values.help) { log(`bun scripts/build-cli.js [--target ${targets.join('|')} | --all]`); return; }
-  if (typeof Bun === 'undefined') throw new Error('构建网页需要 Bun；生成的程序不包含或依赖 Bun。');
+  if (values.help) { log(`node scripts/build-cli.js [--target ${targets.join('|')} | --all]`); return; }
   if (values.all && values.target) throw new Error('--all 与 --target 不能同时使用。');
   const selected = values.all ? targets : [values.target || `${process.platform === 'win32' ? 'windows' : process.platform}-${process.arch}`];
   if (selected.some(target => !targets.includes(target))) throw new Error('不支持的目标平台。');
@@ -73,17 +59,16 @@ async function build(args, { root = path.resolve(__dirname, '..'), log = console
   const goVersion = execFileSync('go', ['version'], { encoding: 'utf8' }).trim();
   const goLicense = [path.join(goRoot, 'LICENSE'), path.join(goRoot, '..', 'LICENSE')].find(file => fs.existsSync(file));
   if (!goLicense) throw new Error('Go 安装中缺少 LICENSE。');
-  const bundled = await Bun.build({ entrypoints: [path.join(root, 'media', 'worker-entry.js')], target: 'browser', format: 'esm',
-    minify: true, write: false, metafile: true, define: { 'process.env.NODE_ENV': '"production"' } });
-  if (!bundled.success) throw new AggregateError(bundled.logs, '无法构建浏览器计算脚本。');
-  const notices = collectNotices(packageDirectories(Object.keys(bundled.metafile.inputs), root), root, fs.readFileSync(goLicense, 'utf8'));
-  const assets = Object.fromEntries(['main.js', 'main.css', 'browser.js', 'view.js', 'themes.js', 'themes.css'].map(name => [name, fs.readFileSync(path.join(root, 'media', name), 'utf8')]));
-  assets['worker.js'] = await bundled.outputs[0].text();
+  const modules = execFileSync('go', ['list', '-deps', '-f', '{{if .Module}}{{if not .Module.Main}}{{.Module.Path}}@{{.Module.Version}}|{{.Module.Dir}}{{end}}{{end}}', '.'], { cwd: path.join(root, 'cli'), encoding: 'utf8' });
+  const dependencies = modules.trim().split('\n').filter(Boolean).map(line => { const [id, directory] = line.split('|'); return { id, directory }; });
+  const notices = collectNotices(dependencies, root, fs.readFileSync(goLicense, 'utf8'));
+  const assets = Object.fromEntries(['main.js', 'main.css', 'browser.js', 'themes.js', 'themes.css'].map(name => [name, fs.readFileSync(path.join(root, 'media', name), 'utf8')]));
   assets['index.html'] = pageHTML({ resource: name => name, browser: true,
-    csp: "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'" });
+    csp: "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; worker-src 'none'; base-uri 'none'; form-action 'none'" });
   assets['licenses.txt'] = notices;
   const assetDirectory = path.join(root, 'cli', 'assets');
   fs.mkdirSync(assetDirectory, { recursive: true });
+  for (const name of ['worker.js.gz', 'view.js.gz']) fs.rmSync(path.join(assetDirectory, name), { force: true });
   for (const [name, source] of Object.entries(assets)) fs.writeFileSync(path.join(assetDirectory, name + '.gz'), gzipSync(Buffer.from(source), { level: 9 }));
   const buildInputsSha256 = buildInputsHash(path.join(root, 'cli'));
   const temporary = fs.mkdtempSync(path.join(process.env.CODEX_AGENT_TMP || os.tmpdir(), 'gridiff-build-'));
@@ -103,7 +88,7 @@ async function build(args, { root = path.resolve(__dirname, '..'), log = console
       fs.copyFileSync(executable, output); fs.chmodSync(output, 0o755);
       fs.writeFileSync(path.join(directory, 'LICENSES.txt'), notices);
       const bytes = fs.readFileSync(output);
-      const receipt = { name: manifest.name, publisher: manifest.publisher, version, target, sourceCommit, sourceDirty, buildInputsSha256, runtime: goVersion, bundler: `bun ${Bun.version}`, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+      const receipt = { name: manifest.name, publisher: manifest.publisher, version, target, sourceCommit, sourceDirty, buildInputsSha256, runtime: goVersion, bundler: 'none', size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
       fs.writeFileSync(`${output}.json`, JSON.stringify(receipt, null, 2) + '\n');
       const Zip = require('jszip'), zip = new Zip();
       zip.file(filename, bytes, { unixPermissions: 0o100755 });
@@ -123,4 +108,4 @@ if (require.main === module) build(process.argv.slice(2)).catch(error => {
   if (error.errors) for (const detail of error.errors) console.error(detail.message || detail);
   process.exitCode = 1;
 });
-module.exports = { build, buildInputsHash, packageDirectories, collectNotices };
+module.exports = { build, buildInputsHash, collectNotices };

@@ -16,7 +16,7 @@
     }).observe({ type: 'longtask', buffered: true });
   }
   const storageKey = `gridiff:${location.pathname}`;
-  let current, busy = false, ended = false, heartbeat, worker, pending, events, requestId = 0;
+  let current, comparisonSettings, busy = false, ended = false, heartbeat, events, requestId = 0;
   let view = {}, viewVersion = 0, queuedView = false, reloadRequested = true, wantedGeneration = 0, loadedGeneration = 0;
   const commands = [];
   const emit = data => window.dispatchEvent(new MessageEvent('message', { data }));
@@ -25,8 +25,6 @@
   }
   function finish(message) {
     ended = true; current = null; clearInterval(heartbeat); events?.close(); commands.length = 0;
-    worker?.terminate(); worker = null;
-    pending?.reject(new Error(message)); pending = null;
     document.querySelector('dialog')?.remove();
     try { sessionStorage.removeItem(storageKey); sessionStorage.removeItem(`${storageKey}:comparison`); } catch { /* Storage may be disabled. */ }
     emit({ type: 'session-ended', message });
@@ -49,28 +47,17 @@
       finish('比较会话已结束或过期。请从 Fork 重新打开比较。');
       return null;
     }
+    if (response.status === 409) {
+      const data = await response.json();
+      wantedGeneration = Math.max(wantedGeneration, data.generation || 0);
+      reloadRequested = true; commands.length = 0;
+      return null;
+    }
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data.error || '操作未完成，请重试。');
     }
     return response.status === 204 ? null : response.json();
-  }
-  function ensureWorker() {
-    if (worker) return;
-    worker = new Worker('worker.js', { type: 'module' });
-    if (perf) perf.workerStarts = (perf.workerStarts || 0) + 1;
-    worker.onmessage = event => {
-      const receivedAt = performance.now();
-      if (!pending || pending.id !== event.data?.id) return;
-      const request = pending; pending = null;
-      if (perf) {
-        for (const { phase, ms, ...counts } of event.data.metrics || []) perf.add(phase, ms, { ...counts, request: request.id });
-        perf.add('worker.roundtrip', receivedAt - request.started, { request: request.id });
-        if (event.data.sentAt) perf.add('worker.transfer', performance.timeOrigin + receivedAt - event.data.sentAt, { request: request.id });
-      }
-      if (event.data.error) request.reject(new Error(event.data.error)); else request.resolve(event.data.data);
-    };
-    worker.onerror = () => finish('比较程序无法运行。请从 Fork 重新打开比较。');
   }
   async function update(message) {
     if (ended) return;
@@ -99,7 +86,7 @@
           const fetchStart = performance.now(), snapshot = await request('snapshot');
           if (ended || !snapshot) return;
           perf?.add('snapshot.fetch', performance.now() - fetchStart);
-          for (const metric of snapshot.metrics || []) perf?.add(metric.phase, metric.ms, { bytes: metric.bytes });
+          for (const { phase, ms, ...counts } of snapshot.metrics || []) perf?.add(phase, ms, counts);
           wantedGeneration = Math.max(wantedGeneration, snapshot.generation || 0);
           let settings;
           try { settings = JSON.parse(sessionStorage.getItem(`${storageKey}:comparison`)); } catch { /* Ignore invalid preferences. */ }
@@ -107,29 +94,33 @@
             settings = undefined;
             if (fetchedView === viewVersion) { view = { ...view, query: '', page: 0 }; emit({ type: 'snapshot-replacing' }); }
           }
-          command = { action: 'load', snapshot, settings, view };
+          command = { action: 'load', generation: snapshot.generation, settings, view };
+          loadedGeneration = snapshot.generation;
         } else if (commands.length) command = commands.shift();
         else command = { action: 'view', view };
         queuedView = false;
         const sentView = viewVersion;
-        ensureWorker();
-        const data = await new Promise((resolve, reject) => {
-          const id = ++requestId;
-          pending = { id, resolve, reject, started: performance.now() };
-          worker.postMessage({ ...command, view, id, profile: !!perf });
-        });
-        if (!data || ended) return;
+        const id = ++requestId, started = performance.now();
+        const response = await request('compare', { ...command, id, generation: command.generation || loadedGeneration,
+          settings: command.action === 'load' ? command.settings : comparisonSettings, view, profile: !!perf });
+        if (ended) return;
+        if (!response) continue;
+        perf?.add('native.roundtrip', performance.now() - started, { request: id });
+        for (const { phase, ms, ...counts } of response.metrics || []) perf?.add(phase, ms, { ...counts, request: id });
+        const data = response.data;
+        if (!data) throw new Error('比较结果无效。');
         loadedGeneration = data.generation;
         if (data.generation < wantedGeneration) continue;
+        comparisonSettings = data.settings;
+        try { sessionStorage.setItem(`${storageKey}:comparison`, JSON.stringify({ ...data.settings, generation: data.generation })); } catch { /* Storage may be disabled. */ }
         if (command.action === 'load') reloadRequested = false;
         if (sentView !== viewVersion) continue;
         view = { ...data.viewState };
-        if (perf) perf.result = { request: requestId, generation: data.generation, workers: perf.workerStarts,
+        if (perf) perf.result = { request: requestId, generation: data.generation, workers: 0, native: true,
           ok: !!data.result && !data.error, rows: data.pageInfo?.totalRows ?? data.result?.rows.length,
           transmittedRows: data.result?.rows.length, transmittedCells: data.result?.rows.reduce((sum, row) => sum + row.cells.length, 0),
-          columns: data.result?.fields.length, counts: data.result?.counts, sheets: data.sheets?.length || 0,
+          columns: data.columnCount ?? data.result?.fields.length, counts: data.result?.counts, sheets: data.sheets?.length || 0,
           sheetErrors: data.sheets?.filter(sheet => sheet.error).length || 0 };
-        try { sessionStorage.setItem(`${storageKey}:comparison`, JSON.stringify({ ...data.settings, generation: data.generation })); } catch { /* Storage may be disabled. */ }
         current = data; emit(data);
       }
     } catch (error) {

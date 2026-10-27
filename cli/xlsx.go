@@ -1,14 +1,12 @@
 package main
 
 import (
-	"archive/zip"
 	"bufio"
 	"bytes"
 	"encoding/binary"
 	"encoding/xml"
 	"errors"
 	"io"
-	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -20,169 +18,49 @@ const maxCells = 1000000
 
 var cellAddress = regexp.MustCompile(`^([A-Z]{1,3})([1-9][0-9]*)$`)
 
-func validateArchive(data []byte) error {
-	_, err := prepareArchive(data, false, sheetSelection{Mode: "all"})
-	return err
+// The plugin ignores CDATA events. encoding/xml merges their type with ordinary
+// text, so remember only each token's opening bytes. The decoder can read ahead;
+// the last bounded read chunk supplies prefixes already buffered inside it.
+type xmlPrefixReader struct {
+	source     io.Reader
+	end, start int64
+	last       []byte
+	prefix     [9]byte
+	length     int
 }
 
-func prepareArchive(data []byte, compact bool, selection sheetSelection) ([]byte, error) {
-	selection, err := selection.normalized()
-	if err != nil {
-		return nil, err
+func (r *xmlPrefixReader) begin(start int64) {
+	r.start, r.length = start, 0
+	base := r.end - int64(len(r.last))
+	if start >= base && start < r.end {
+		r.length = copy(r.prefix[:], r.last[start-base:])
 	}
-	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
-	if err != nil {
-		return nil, errors.New("文件不是有效的 XLSX 压缩包")
-	}
-	if len(archive.File) > 10000 {
-		return nil, errors.New("XLSX 压缩包文件数量超过 10000")
-	}
-	var output bytes.Buffer
-	var writer *zip.Writer
-	if compact {
-		writer = zip.NewWriter(&output)
-		defer writer.Close()
-	}
-	changed := false
-	names := make(map[string]bool)
-	entries := make(map[string]*zip.File)
-	var declared uint64
-	var expanded int64
-	cells, rows := 0, 0
-	for _, entry := range archive.File {
-		name := strings.TrimSuffix(entry.Name, "/")
-		if name == "" || path.Clean(name) != name || strings.HasPrefix(name, "/") || strings.HasPrefix(name, "../") || strings.Contains(name, "\\") || (len(name) > 1 && name[1] == ':') {
-			return nil, errors.New("XLSX 压缩包路径无效")
-		}
-		if names[entry.Name] {
-			return nil, errors.New("XLSX 压缩包包含重复文件")
-		}
-		names[entry.Name] = true
-		if entry.Flags&1 != 0 {
-			return nil, errors.New("暂不支持加密的 XLSX")
-		}
-		if entry.UncompressedSize64 > maxExpanded || declared+entry.UncompressedSize64 > maxExpanded {
-			return nil, errors.New("XLSX 解压后超过 128 MiB，请缩小工作簿")
-		}
-		declared += entry.UncompressedSize64
-		entries[entry.Name] = entry
-	}
-	selected, err := worksheetPaths(entries, &expanded, selection)
-	if err != nil {
-		return nil, err
-	}
-	removed := false
-	for _, entry := range archive.File {
-		if unusedWorksheet(entry.Name, selected) {
-			removed = true
-			continue
-		}
-		// Metadata was already validated while resolving workbook order.
-		if selected != nil && (entry.Name == "xl/workbook.xml" || entry.Name == "xl/_rels/workbook.xml.rels") {
-			if writer != nil {
-				if err := writer.Copy(entry); err != nil {
-					return nil, err
-				}
-			}
-			continue
-		}
-		reader, err := entry.Open()
-		if err != nil {
-			return nil, err
-		}
-		limit := &io.LimitedReader{R: reader, N: maxExpanded - expanded + 1}
-		before := limit.N
-		lower := strings.ToLower(entry.Name)
-		var trimmed formulaXML
-		if strings.HasSuffix(lower, ".xml") || strings.HasSuffix(lower, ".rels") {
-			worksheet := strings.HasPrefix(entry.Name, "xl/worksheets/") && !strings.Contains(strings.TrimPrefix(entry.Name, "xl/worksheets/"), "/") && strings.HasSuffix(entry.Name, ".xml")
-			var target *formulaXML
-			if compact && worksheet {
-				target = &trimmed
-			}
-			err = scanXML(limit, worksheet, &rows, &cells, target)
-		} else {
-			_, err = io.Copy(io.Discard, limit)
-		}
-		expanded += before - limit.N
-		closeErr := reader.Close()
-		if expanded > maxExpanded {
-			return nil, errors.New("XLSX 解压后超过 128 MiB，请缩小工作簿")
-		}
-		if err != nil {
-			return nil, err
-		}
-		if closeErr != nil {
-			return nil, closeErr
-		}
-		if writer != nil {
-			if trimmed.changed {
-				changed = true
-				part, createErr := writer.Create(entry.Name)
-				if createErr != nil {
-					return nil, createErr
-				}
-				if _, err := part.Write(trimmed.output.Bytes()); err != nil {
-					return nil, err
-				}
-			} else if err := writer.Copy(entry); err != nil {
-				return nil, err
-			}
-		}
-	}
-	if !names["xl/workbook.xml"] {
-		return nil, errors.New("文件不是有效的 XLSX 工作簿")
-	}
-	if writer != nil {
-		if err := writer.Close(); err != nil {
-			return nil, err
-		}
-		if removed || changed && output.Len() < len(data) {
-			return output.Bytes(), nil
-		}
-	}
-	return data, nil
 }
 
-func validateXML(input io.Reader, worksheet bool, rows, cells *int) error {
-	return scanXML(input, worksheet, rows, cells, nil)
-}
-
-// Keep the formula marker and attributes so ExcelJS retains cached-value types and empty-cell ranges.
-type formulaXML struct {
-	output  bytes.Buffer
-	changed bool
-}
-
-// Fall back to the original ZIP rather than retaining a large XML part or token twice.
-type formulaCapture struct {
-	bytes.Buffer
-	disabled bool
-}
-
-func (c *formulaCapture) Write(data []byte) (int, error) {
-	if !c.disabled {
-		if c.Len()+len(data) > maxBytes {
-			c.disabled = true
-			c.Buffer = bytes.Buffer{}
-		} else {
-			c.Buffer.Write(data)
-		}
+func (r *xmlPrefixReader) Read(buffer []byte) (int, error) {
+	if len(buffer) > 4096 {
+		buffer = buffer[:4096]
 	}
-	return len(data), nil
+	n, err := r.source.Read(buffer)
+	next := r.start + int64(r.length)
+	if r.length < len(r.prefix) && next >= r.end && next < r.end+int64(n) {
+		r.length += copy(r.prefix[r.length:], buffer[next-r.end:n])
+	}
+	r.end += int64(n)
+	if n > 0 {
+		r.last = append(r.last[:0], buffer[:n]...)
+	}
+	return n, err
 }
 
-func scanXML(input io.Reader, worksheet bool, rows, cells *int, compact *formulaXML) error {
-	return scanXMLTokens(input, worksheet, rows, cells, compact, nil)
-}
+func (r *xmlPrefixReader) cdata() bool { return r.length == 9 && string(r.prefix[:]) == "<![CDATA[" }
 
-func scanXMLTokens(input io.Reader, worksheet bool, rows, cells *int, compact *formulaXML, visit func(xml.Token) error) error {
+func scanXMLTokens(input io.Reader, worksheet bool, rows, cells *int, visit func(xml.Token) error) error {
 	buffered := bufio.NewReader(input)
 	prefix, _ := buffered.Peek(2)
 	var source io.Reader = buffered
 	convertedUTF16 := false
 	if bytes.Equal(prefix, []byte{0xff, 0xfe}) || bytes.Equal(prefix, []byte{0xfe, 0xff}) {
-		compact = nil // Preserve the original encoding for UTF-16 worksheet parts.
 		convertedUTF16 = true
 		// Only BOM-marked UTF-16 XML needs a temporary conversion; ZIP expansion stays bounded.
 		data, err := io.ReadAll(buffered)
@@ -214,9 +92,10 @@ func scanXMLTokens(input io.Reader, worksheet bool, rows, cells *int, compact *f
 	} else if prefix, _ := buffered.Peek(3); bytes.Equal(prefix, []byte{0xef, 0xbb, 0xbf}) {
 		_, _ = buffered.Discard(3)
 	}
-	var captured formulaCapture
-	if compact != nil {
-		source = io.TeeReader(source, &captured)
+	var lexical *xmlPrefixReader
+	if visit != nil {
+		lexical = &xmlPrefixReader{source: source}
+		source = lexical
 	}
 	decoder := xml.NewDecoder(source)
 	decoder.CharsetReader = func(charset string, reader io.Reader) (io.Reader, error) {
@@ -226,10 +105,10 @@ func scanXMLTokens(input io.Reader, worksheet bool, rows, cells *int, compact *f
 		return nil, errors.New("XLSX XML 编码不受支持")
 	}
 	currentRow, depth, roots := 0, 0, 0
-	var parents []xml.Name
-	var offset int64
-	formulaDepth, formulaText := 0, false
 	for {
+		if lexical != nil {
+			lexical.begin(decoder.InputOffset())
+		}
 		token, err := decoder.Token()
 		if err == io.EOF {
 			if depth != 0 || roots != 1 {
@@ -241,55 +120,11 @@ func scanXMLTokens(input io.Reader, worksheet bool, rows, cells *int, compact *f
 			return err
 		}
 		if visit != nil {
-			if err := visit(token); err != nil {
-				return err
-			}
-		}
-		if compact != nil {
-			end := decoder.InputOffset()
-			var raw []byte
-			if !captured.disabled {
-				raw = captured.Next(int(end - offset))
-			}
-			offset = end
-			value, text := token.(xml.CharData)
-			// ExcelJS ignores CDATA events; converting them to ordinary text changes empty-cell semantics.
-			formula := text && formulaDepth > 0 && !bytes.HasPrefix(raw, []byte("<![CDATA["))
-			growth := len(raw)
-			if formula {
-				growth = 0
-				if len(value) > 0 && !formulaText {
-					growth = 1
+			_, text := token.(xml.CharData)
+			if !text || !lexical.cdata() {
+				if err := visit(token); err != nil {
+					return err
 				}
-			}
-			if captured.disabled || compact.output.Len()+growth > maxBytes {
-				compact.output = bytes.Buffer{}
-				compact.changed = false
-				compact = nil
-				captured.disabled = true
-				captured.Buffer = bytes.Buffer{}
-			} else if formula {
-				if len(value) > 0 && !formulaText {
-					compact.output.WriteByte('0')
-					formulaText = true
-				}
-				compact.changed = true
-			} else {
-				compact.output.Write(raw)
-			}
-		}
-		if compact != nil {
-			if value, ok := token.(xml.StartElement); ok {
-				if worksheetFormula(parents, value.Name) {
-					formulaDepth = len(parents) + 1
-					formulaText = false
-				}
-				parents = append(parents, value.Name)
-			} else if _, ok := token.(xml.EndElement); ok {
-				if formulaDepth == len(parents) {
-					formulaDepth = 0
-				}
-				parents = parents[:len(parents)-1]
 			}
 		}
 		switch value := token.(type) {
@@ -344,19 +179,4 @@ func scanXMLTokens(input io.Reader, worksheet bool, rows, cells *int, compact *f
 			}
 		}
 	}
-}
-
-func worksheetFormula(parents []xml.Name, name xml.Name) bool {
-	if len(parents) != 4 || name.Local != "f" {
-		return false
-	}
-	if name.Space != "" && name.Space != "http://schemas.openxmlformats.org/spreadsheetml/2006/main" && name.Space != "http://purl.oclc.org/ooxml/spreadsheetml/main" {
-		return false
-	}
-	for i, local := range []string{"worksheet", "sheetData", "row", "c"} {
-		if parents[i].Local != local || parents[i].Space != name.Space {
-			return false
-		}
-	}
-	return true
 }

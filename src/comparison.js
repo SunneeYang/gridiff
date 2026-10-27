@@ -8,7 +8,7 @@ const byteLength = input => typeof input === 'string' ? new TextEncoder().encode
 const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_CELLS = 1000000;
 
-// Both hosts compare the same in-memory snapshot; file access belongs to the host.
+// The independent plugin compares in memory; native Go parity is checked with shared fixtures.
 function createComparison({ xlsx = false, options: initialOptions = {}, sheetSelection: initialSheetSelection, getDefaults, workbookReader, workbookPairReader, onMetric } = {}) {
   function timed(phase, operation, counts = {}) {
     if (!onMetric) return operation();

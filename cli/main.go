@@ -7,7 +7,6 @@ import (
 	"context"
 	"crypto/rand"
 	"embed"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -36,7 +35,7 @@ var version = "dev"
 var buildID = "dev"
 
 const maxBytes = 8 * 1024 * 1024
-const csp = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+const csp = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; worker-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
 type snapshot struct {
 	SheetSelection sheetSelection `json:"sheetSelection"`
@@ -44,16 +43,17 @@ type snapshot struct {
 	Sources        []string       `json:"sources"`
 	Title          string         `json:"title"`
 	XLSX           bool           `json:"xlsx"`
-	Inputs         []string       `json:"inputs"`
-	Error          string         `json:"error,omitempty"`
-	Unsupported    bool           `json:"unsupported,omitempty"`
-	Metrics        []phaseMetric  `json:"metrics,omitempty"`
+	native         *nativeComparison
+	Error          string        `json:"error,omitempty"`
+	Unsupported    bool          `json:"unsupported,omitempty"`
+	Metrics        []phaseMetric `json:"metrics,omitempty"`
 }
 
 type phaseMetric struct {
 	Phase string  `json:"phase"`
 	MS    float64 `json:"ms"`
 	Bytes int     `json:"bytes"`
+	Cells int     `json:"cells,omitempty"`
 }
 
 type preferences struct {
@@ -131,9 +131,9 @@ func makeSnapshot(files []string, selection sheetSelection) (*snapshot, error) {
 	if len(files) != 2 || files[0] == "" || files[1] == "" {
 		return nil, errors.New("需要旧版本和新版本两个文件")
 	}
-	result := &snapshot{SheetSelection: selection, Sources: make([]string, 2), Inputs: make([]string, 2)}
+	result := &snapshot{SheetSelection: selection, Sources: make([]string, 2), native: &nativeComparison{cache: make(map[string]*nativeSheet)}}
 	record := func(phase string, start time.Time, size int) {
-		result.Metrics = append(result.Metrics, phaseMetric{phase, float64(time.Since(start).Microseconds()) / 1000, size})
+		result.Metrics = append(result.Metrics, phaseMetric{Phase: phase, MS: float64(time.Since(start).Microseconds()) / 1000, Bytes: size})
 	}
 	kinds := make([]string, 2)
 	for i, file := range files {
@@ -174,48 +174,66 @@ func makeSnapshot(files []string, selection sheetSelection) (*snapshot, error) {
 			return nil, err
 		}
 	}
-	if result.XLSX {
-		var pending sync.WaitGroup
-		var failures [2]error
-		var metrics [2][]phaseMetric
-		for i, data := range buffers {
-			pending.Add(1)
-			go func(i int, data []byte) {
-				defer pending.Done()
-				record := func(phase string, start time.Time, size int) {
-					metrics[i] = append(metrics[i], phaseMetric{phase, float64(time.Since(start).Microseconds()) / 1000, size})
+	var pending sync.WaitGroup
+	var failures [2]error
+	var metrics [2][]phaseMetric
+	for i, data := range buffers {
+		if !result.XLSX && (!utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0) {
+			return nil, errors.New("CSV 必须是 UTF-8 文本，请检查文件编码或格式")
+		}
+		pending.Add(1)
+		go func(i int, data []byte) {
+			defer pending.Done()
+			if result.XLSX {
+				if len(data) == 0 {
+					result.native.books[i] = []rawSheet{}
+					return
 				}
-				if len(data) > 0 {
-					start := time.Now()
-					prepared, err := prepareArchive(data, true, selection)
-					record("server.xlsx_validate", start, len(data))
-					if err != nil {
-						failures[i] = err
-						return
-					}
-					data = prepared
-				}
+				result.native.books[i], metrics[i], failures[i] = readNativeWorkbook(data, selection)
+			} else {
 				start := time.Now()
-				result.Inputs[i] = base64.StdEncoding.EncodeToString(data)
-				record("server.base64", start, len(data))
-			}(i, data)
-		}
-		pending.Wait()
-		for i, err := range failures {
-			result.Metrics = append(result.Metrics, metrics[i]...)
-			if err != nil && result.Error == "" {
-				result.Error = "无法读取 XLSX：" + err.Error()
-				result.Inputs = []string{"", ""}
+				result.native.csv[i], failures[i] = parseCSVRows(string(data))
+				metrics[i] = []phaseMetric{{Phase: "server.csv_parse", MS: float64(time.Since(start).Microseconds()) / 1000, Bytes: len(data)}}
 			}
-		}
-	} else {
-		for i, data := range buffers {
-			if !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
-				return nil, errors.New("CSV 必须是 UTF-8 文本，请检查文件编码或格式")
+		}(i, data)
+	}
+	pending.Wait()
+	for i, failure := range failures {
+		result.Metrics = append(result.Metrics, metrics[i]...)
+		if failure != nil && result.Error == "" {
+			result.Error = failure.Error()
+			if result.XLSX {
+				result.Error = "无法读取 XLSX：" + result.Error
 			}
-			result.Inputs[i] = string(data)
 		}
 	}
+	if result.XLSX && result.Error == "" && selection.Mode == "named" {
+		names := make(map[string]bool)
+		for _, book := range result.native.books {
+			for _, sheet := range book {
+				names[sheet.Name] = true
+			}
+		}
+		var missing []string
+		for _, name := range selection.Names {
+			if !names[name] {
+				missing = append(missing, name)
+			}
+		}
+		if len(missing) > 0 {
+			result.Error = "两侧均找不到所选工作表：" + strings.Join(missing, "、")
+		}
+	}
+	if result.Error != "" {
+		result.native.books = [2][]rawSheet{}
+		result.native.csv = [2][][]string{}
+	}
+	if result.Error == "" {
+		start := time.Now()
+		_, _ = result.native.payload(result, 0, "load", "", nil, nativeSettings{Options: defaultTableOptions(), SheetOptions: [][2]any{}}, viewState{View: "grid", OnlyChanges: true, OnlyFields: true})
+		record("server.compare", start, 0)
+	}
+
 	record("server.snapshot", started, len(buffers[0])+len(buffers[1]))
 	return result, nil
 }
@@ -300,12 +318,12 @@ func failHTTP(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
 
-func readObject(w http.ResponseWriter, r *http.Request) (map[string]json.RawMessage, error) {
+func readObject(w http.ResponseWriter, r *http.Request, limit int64) (map[string]json.RawMessage, error) {
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || media != "application/json" {
 		return nil, errors.New("请求必须使用 JSON")
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 65536)
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	defer r.Body.Close()
 	decoder := json.NewDecoder(r.Body)
 	var value map[string]json.RawMessage
@@ -402,15 +420,19 @@ func (s *comparisonServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if r.Method != http.MethodPost || (route != "heartbeat" && route != "close" && route != "preferences" && route != "submit") {
+	if r.Method != http.MethodPost || (route != "heartbeat" && route != "close" && route != "preferences" && route != "submit" && route != "compare") {
 		failHTTP(w, 405, "请求方式无效")
+		return
+	}
+	if route == "compare" {
+		s.compare(w, r, data)
 		return
 	}
 	if route == "submit" {
 		s.submit(w, r)
 		return
 	}
-	object, err := readObject(w, r)
+	object, err := readObject(w, r, 65536)
 	if err != nil {
 		failHTTP(w, 400, err.Error())
 		return
@@ -447,7 +469,7 @@ func (s *comparisonServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func asset(name string) ([]byte, error) {
 	switch name {
-	case "index.html", "main.js", "main.css", "browser.js", "worker.js", "view.js", "themes.js", "themes.css", "licenses.txt":
+	case "index.html", "main.js", "main.css", "browser.js", "themes.js", "themes.css", "licenses.txt":
 		return assetsFS.ReadFile("assets/" + name + ".gz")
 	default:
 		return nil, os.ErrNotExist
