@@ -1,0 +1,52 @@
+{
+  "name": "gridiff",
+  "displayName": "Gridiff — Visual Table Diff",
+  "description": "看清每一个单元格的变化。按主键和字段对齐 CSV，支持 Mova 多行表头。",
+  "version": "0.1.13",
+  "publisher": "sunneeyang",
+  "repository": { "type": "git", "url": "https://github.com/SunneeYang/gridiff.git" },
+  "license": "MIT",
+  "private": true,
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "keywords": ["csv", "diff", "table", "mova"],
+  "main": "./src/extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "capabilities": { "untrustedWorkspaces": { "supported": true }, "virtualWorkspaces": true },
+  "contributes": {
+    "commands": [
+      { "command": "gridiff.openDiff", "title": "Gridiff: 以表格方式查看当前差异", "icon": "$(table)" },
+      { "command": "gridiff.compareFiles", "title": "Gridiff: 比较两个文件…" },
+      { "command": "gridiff.selectLeft", "title": "Gridiff: 选择为旧版本" },
+      { "command": "gridiff.compareSelected", "title": "Gridiff: 与所选旧版本比较" },
+      { "command": "gridiff.compareHead", "title": "Gridiff: 与 HEAD 比较", "icon": "$(table)" }
+    ],
+    "menus": {
+      "editor/title": [{ "command": "gridiff.openDiff", "when": "isInDiffEditor", "group": "navigation" }],
+      "explorer/context": [
+        { "command": "gridiff.selectLeft", "when": "!explorerResourceIsFolder", "group": "gridiff@1" },
+        { "command": "gridiff.compareSelected", "when": "!explorerResourceIsFolder && gridiff.hasLeft", "group": "gridiff@2" },
+        { "command": "gridiff.compareFiles", "when": "!explorerResourceIsFolder", "group": "gridiff@3" },
+        { "command": "gridiff.compareHead", "when": "resourceScheme == file && !explorerResourceIsFolder", "group": "gridiff@4" }
+      ]
+    },
+    "configuration": {
+      "title": "Gridiff",
+      "properties": {
+        "gridiff.autoOpenDiff": { "type": "boolean", "default": true, "description": "CSV 文本差异成为活动标签时自动打开 Gridiff。保留原差异标签；切回文本或关闭 Gridiff 后，同一标签不会重复自动打开。" },
+        "gridiff.format": { "type": "string", "enum": ["auto", "csv", "mova", "headerless", "custom"], "default": "auto", "description": "CSV 表头格式。auto 保守识别 Mova 四行表头，否则按普通 CSV。" },
+        "gridiff.keyColumns": { "type": "array", "items": { "type": "string" }, "default": [], "description": "用于记录对齐的字段名，可为复合主键。留空自动使用 id 或第一列。" },
+        "gridiff.headerRow": { "type": "number", "default": 1, "minimum": 1, "description": "custom 格式的字段名所在记录（从 1 开始，CSV 引号内换行不另计）。" },
+        "gridiff.dataStartRow": { "type": "number", "default": 2, "minimum": 1, "description": "custom 格式的数据起始记录（从 1 开始）。" },
+        "gridiff.descriptionRow": { "type": "number", "default": 0, "minimum": 0, "description": "custom 格式的中文说明所在记录，0 表示无。" }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "test:ui": "node test/ui.cjs",
+    "check": "node --check src/extension.js && node --check src/csv.js && node --check src/diff.js && node --check src/webview.js && node --check media/main.js",
+    "package": "vsce package -o dist/"
+  },
+  "devDependencies": { "@vscode/vsce": "^3.6.0", "playwright": "^1.62.1" }
+}
