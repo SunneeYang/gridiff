@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -78,6 +79,14 @@ func TestSnapshotSurvivesInputRemoval(t *testing.T) {
 	}
 	if data.XLSX || data.Inputs[1] != "id,value\n001,new" || data.Title != "new $value.csv" {
 		t.Fatalf("unexpected snapshot: %+v", data)
+	}
+	if len(data.Metrics) != 3 || data.Metrics[2].Phase != "server.snapshot" {
+		t.Fatal("missing snapshot phase measurements", data.Metrics)
+	}
+	for _, metric := range data.Metrics {
+		if metric.MS < 0 || metric.Bytes < 0 {
+			t.Fatal("invalid phase measurement", metric)
+		}
 	}
 	if w.Header().Get("Cache-Control") != "no-store" || !strings.Contains(w.Header().Get("Content-Security-Policy"), "worker-src 'self'") {
 		t.Fatal("snapshot lacks browser security headers")
@@ -175,7 +184,7 @@ func TestCloseAndTimeout(t *testing.T) {
 
 func TestFileBoundaryAndEmptyWorkbookSide(t *testing.T) {
 	files := fixture(t, nil, workbookZIP(t, map[string][]byte{"xl/workbook.xml": []byte(`<workbook/>`)}), "xlsx")
-	data, err := makeSnapshot(files)
+	data, err := makeSnapshot(files, sheetSelection{})
 	if err != nil || !data.XLSX || data.Error != "" || data.Inputs[0] != "" || data.Inputs[1] == "" {
 		t.Fatal(data, err)
 	}
@@ -189,11 +198,117 @@ func TestFileBoundaryAndEmptyWorkbookSide(t *testing.T) {
 		t.Fatal("oversized file accepted")
 	}
 	invalid := fixture(t, []byte{0xff}, []byte("id,v\n1,a"), "csv")
-	if _, err := makeSnapshot(invalid); err == nil {
+	if _, err := makeSnapshot(invalid, sheetSelection{}); err == nil {
 		t.Fatal("invalid UTF8 accepted")
 	}
-	mixed := fixture(t, []byte{'P', 'K', 3, 4}, []byte("id,v\n1,a"), "tmp")
-	if _, err := makeSnapshot(mixed); err == nil {
-		t.Fatal("mixed CSV/XLSX accepted")
+}
+
+func TestParallelWorkbookSnapshotCompletesBothSidesBeforeReturning(t *testing.T) {
+	left := workbookZIP(t, map[string][]byte{"xl/workbook.xml": []byte(`<workbook/>`), "xl/worksheets/sheet1.xml": []byte(`<worksheet><sheetData><row r="1"><c r="A1"><f>` + strings.Repeat("A1+", 1000) + `1</f><v>1</v></c></row></sheetData></worksheet>`)})
+	right := workbookZIP(t, map[string][]byte{"xl/workbook.xml": []byte(`<workbook/>`), "xl/worksheets/sheet1.xml": []byte(`<worksheet><sheetData><row r="1"><c r="A1"><v>2</v></c></row></sheetData></worksheet>`)})
+	files := fixture(t, left, right, "xlsx")
+	s := testServer(t, serverOptions{Files: files})
+	for _, file := range files {
+		if err := os.Remove(file); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := request(t, s, "GET", "snapshot", "", nil)
+	var data snapshot
+	if err := json.Unmarshal(w.Body.Bytes(), &data); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || data.Error != "" || !data.XLSX {
+		t.Fatal(w.Code, data.Error)
+	}
+	for i, original := range [][]byte{left, right} {
+		want, err := prepareArchive(original, true, sheetSelection{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if data.Inputs[i] != base64.StdEncoding.EncodeToString(want) {
+			t.Fatalf("side %d was incomplete or swapped", i)
+		}
+	}
+	if len(data.Metrics) != 7 {
+		t.Fatal("missing measurements from one side", data.Metrics)
+	}
+	for _, metric := range data.Metrics {
+		if metric.MS < 0 || metric.Bytes < 0 {
+			t.Fatal("invalid measurement", metric)
+		}
+	}
+}
+
+func TestParallelWorkbookFailureKeepsLeftPriorityAndClearsBothSides(t *testing.T) {
+	good := workbookZIP(t, map[string][]byte{"xl/workbook.xml": []byte(`<workbook/>`)})
+	badXML := workbookZIP(t, map[string][]byte{"xl/workbook.xml": []byte(`<!DOCTYPE workbook><workbook/>`)})
+	badZIP := []byte("not a zip")
+	for _, pair := range [][2][]byte{{badXML, good}, {good, badZIP}, {badXML, badZIP}} {
+		_, expected := prepareArchive(pair[0], true, sheetSelection{})
+		if expected == nil {
+			_, expected = prepareArchive(pair[1], true, sheetSelection{})
+		}
+		data, err := makeSnapshot(fixture(t, pair[0], pair[1], "xlsx"), sheetSelection{})
+		if err != nil || data.Error != "无法读取 XLSX："+expected.Error() {
+			t.Fatal(data, err)
+		}
+		if data.Inputs[0] != "" || data.Inputs[1] != "" {
+			t.Fatal("partial snapshot survived validation failure")
+		}
+	}
+}
+
+func TestSnapshotRoutesOnlyByExtension(t *testing.T) {
+	for _, ext := range []string{"txt", "json", "png", "pdf", "xls", "xlsb", "ods", "zip", "tmp", "csv.bak", ""} {
+		t.Run(ext, func(t *testing.T) {
+			files := fixture(t, []byte("id,value\n1,a"), []byte{'P', 'K', 3, 4}, ext)
+			if ext == "" {
+				for i, file := range files {
+					files[i] = strings.TrimSuffix(file, ".")
+					if err := os.Rename(file, files[i]); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if err := os.Truncate(files[0], maxBytes+1); err != nil {
+				t.Fatal(err)
+			}
+			data, err := makeSnapshot(files, sheetSelection{})
+			if err != nil || !data.Unsupported || !strings.Contains(data.Error, ".csv") || !strings.Contains(data.Error, ".xlsx") {
+				t.Fatal(data, err)
+			}
+			if data.Title == "" || data.Inputs[0] != "" || data.Inputs[1] != "" || len(data.Metrics) != 1 || data.Metrics[0].Phase != "server.snapshot" {
+				t.Fatal("unsupported inputs must not be read", data)
+			}
+		})
+	}
+	if runtime.GOOS != "windows" {
+		data, err := makeSnapshot([]string{"/DEV/NULL", os.DevNull}, sheetSelection{})
+		if err != nil || !data.Unsupported {
+			t.Fatal("Unix null device names are case sensitive", data, err)
+		}
+	}
+	csv := fixture(t, nil, []byte("id,value\n1,a"), "CSV")
+	xlsx := fixture(t, nil, workbookZIP(t, map[string][]byte{"xl/workbook.xml": []byte(`<workbook/>`)}), "XlSx")
+	for _, files := range [][]string{csv, xlsx, {os.DevNull, csv[1]}, {csv[1], os.DevNull}, {os.DevNull, xlsx[1]}, {xlsx[1], os.DevNull}} {
+		data, err := makeSnapshot(files, sheetSelection{})
+		if err != nil || data.Unsupported || data.Error != "" {
+			t.Fatal(data, err)
+		}
+	}
+	for _, files := range [][]string{{csv[0], xlsx[1]}, {xlsx[0], csv[1]}} {
+		data, err := makeSnapshot(files, sheetSelection{})
+		if err != nil || !data.Unsupported || !strings.Contains(data.Error, "混合") {
+			t.Fatal(data, err)
+		}
+	}
+	disguised := fixture(t, []byte{'P', 'K', 3, 4, 0}, []byte("id,value\n1,a"), "csv")
+	if _, err := makeSnapshot(disguised, sheetSelection{}); err == nil || !strings.Contains(err.Error(), "CSV") {
+		t.Fatal("CSV must not be sniffed as XLSX", err)
+	}
+	data, err := makeSnapshot(fixture(t, []byte("id,value\n1,a"), nil, "xlsx"), sheetSelection{})
+	if err != nil || !data.XLSX || data.Unsupported || !strings.Contains(data.Error, "XLSX") {
+		t.Fatal("XLSX validation was skipped", data, err)
 	}
 }

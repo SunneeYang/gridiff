@@ -124,7 +124,9 @@ function activate(context) {
       try {
         const texts = load ? await load() : await Promise.all(sources.map(read));
         if (disposed) return;
-        await comparison.load(texts);
+        const config = vscode.workspace.getConfiguration('gridiff', right);
+        const mode = config.get('xlsxSheets', 'all');
+        await comparison.load(texts, { mode, ...(mode === 'named' ? { names: config.get('xlsxSheetNames', []) } : {}) });
       }
       catch (e) { comparison.fail(e); }
       finally { busy = false; send(); }

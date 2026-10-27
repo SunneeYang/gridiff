@@ -14,7 +14,7 @@ async function main() {
   const source = process.argv[2] || path.join(__dirname, '..', 'dist', 'cli', `gridiff-${platform}-${process.arch}`, filename);
   const binary = path.join(temporary, filename);
   fs.copyFileSync(source, binary); fs.chmodSync(binary, 0o755);
-  const environment = { ...process.env, PATH: process.platform === 'win32' ? process.env.SystemRoot : '/usr/bin:/bin' };
+  const environment = { ...process.env, GRIDIFF_RUNTIME_DIR: path.join(temporary, 'instances'), PATH: process.platform === 'win32' ? process.env.SystemRoot : '/usr/bin:/bin' };
   const launch = files => {
     const result = spawnSync(binary, ['--no-open', '--', ...files], { cwd: temporary, env: environment, encoding: 'utf8', timeout: 15000 });
     assert.equal(result.status, 0, result.error?.message || result.stderr);
@@ -41,9 +41,10 @@ async function main() {
       await page.goto(url);
       await page.locator('tr.modified').waitFor();
       if (xlsx) {
-        assert.deepEqual(await page.locator('#sheet option').evaluateAll(options => options.map(option => option.value)), ['Data', 'Other']);
-        assert.match(await page.locator('#content').innerText(), /2\+2/);
-        assert.match(await page.locator('#content').innerText(), /3\+3/);
+        assert.deepEqual(await page.locator('#sheet option').evaluateAll(options => options.map(option => option.value)), ['Data']);
+        assert.equal(await page.locator('td.changed .before > :last-child').innerText(), '4');
+        assert.equal(await page.locator('td.changed .after > :last-child').innerText(), '6');
+        assert.doesNotMatch(await page.locator('#content').innerText(), /2\+2|3\+3/);
       } else assert.match(await page.locator('tr.modified').innerText(), /new/);
       await page.emulateMedia({ colorScheme: 'dark' });
       await page.waitForFunction(() => document.documentElement.dataset.appearance === 'dark');

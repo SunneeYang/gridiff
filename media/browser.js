@@ -1,13 +1,30 @@
 'use strict';
 (() => {
+  const perf = new URLSearchParams(location.hash.slice(1)).get('profile') === '1' ? {
+    events: [], dropped: 0,
+    add(phase, ms, counts = {}) {
+      const event = { phase, ms: Math.round(ms * 100) / 100, at: performance.now(), ...counts };
+      if (this.events.length === 500) { this.events.shift(); this.dropped++; }
+      this.events.push(event);
+      console.debug('[Gridiff perf]', JSON.stringify(event));
+    }
+  } : null;
+  if (perf) {
+    window.gridiffPerf = perf;
+    if (PerformanceObserver.supportedEntryTypes?.includes('longtask')) new PerformanceObserver(list => {
+      for (const entry of list.getEntries()) perf.add('browser.longtask', entry.duration);
+    }).observe({ type: 'longtask', buffered: true });
+  }
   const storageKey = `gridiff:${location.pathname}`;
-  let current, busy = false, ended = false, heartbeat, worker, pending, requestId = 0;
+  let current, busy = false, ended = false, heartbeat, worker, pending, events, requestId = 0;
+  let view = {}, viewVersion = 0, queuedView = false, reloadRequested = true, wantedGeneration = 0, loadedGeneration = 0;
+  const commands = [];
   const emit = data => window.dispatchEvent(new MessageEvent('message', { data }));
   function savedState() {
     try { return JSON.parse(sessionStorage.getItem(storageKey)) || {}; } catch { return {}; }
   }
   function finish(message) {
-    ended = true; current = null; clearInterval(heartbeat);
+    ended = true; current = null; clearInterval(heartbeat); events?.close(); commands.length = 0;
     worker?.terminate(); worker = null;
     pending?.reject(new Error(message)); pending = null;
     document.querySelector('dialog')?.remove();
@@ -38,41 +55,90 @@
     }
     return response.status === 204 ? null : response.json();
   }
+  function ensureWorker() {
+    if (worker) return;
+    worker = new Worker('worker.js', { type: 'module' });
+    if (perf) perf.workerStarts = (perf.workerStarts || 0) + 1;
+    worker.onmessage = event => {
+      const receivedAt = performance.now();
+      if (!pending || pending.id !== event.data?.id) return;
+      const request = pending; pending = null;
+      if (perf) {
+        for (const { phase, ms, ...counts } of event.data.metrics || []) perf.add(phase, ms, { ...counts, request: request.id });
+        perf.add('worker.roundtrip', receivedAt - request.started, { request: request.id });
+        if (event.data.sentAt) perf.add('worker.transfer', performance.timeOrigin + receivedAt - event.data.sentAt, { request: request.id });
+      }
+      if (event.data.error) request.reject(new Error(event.data.error)); else request.resolve(event.data.data);
+    };
+    worker.onerror = () => finish('比较程序无法运行。请从 Fork 重新打开比较。');
+  }
   async function update(message) {
-    if (ended || busy) return;
+    if (ended) return;
+    if (message?.action === 'view' || message?.action === 'ready') {
+      view = { ...message.view }; viewVersion++; queuedView = true;
+    } else if (message?.action === 'load-latest') {
+      if (message.generation <= Math.max(wantedGeneration, loadedGeneration)) return;
+      wantedGeneration = Math.max(wantedGeneration, message.generation);
+      if (wantedGeneration <= loadedGeneration) return;
+      reloadRequested = true; commands.length = 0;
+      if (loadedGeneration) {
+        view = { ...view, query: '', page: 0 }; viewVersion++;
+        emit({ type: 'snapshot-replacing' });
+      }
+      document.querySelector('dialog')?.remove();
+    } else if (message) commands.push(message);
+    if (busy) return;
     busy = true;
     if (current) emit({ ...current, busy: true });
     try {
-      if (!worker) {
-        const snapshot = await request('snapshot');
-        if (ended || !snapshot) return;
-        worker = new Worker('worker.js', { type: 'module' });
-        worker.onmessage = event => {
-          if (!pending || pending.id !== event.data?.id) return;
-          const request = pending; pending = null;
-          if (event.data.error) request.reject(new Error(event.data.error)); else request.resolve(event.data.data);
-        };
-        worker.onerror = () => finish('比较程序无法运行。请从 Fork 重新打开比较。');
-        let settings;
-        try { settings = JSON.parse(sessionStorage.getItem(`${storageKey}:comparison`)); } catch { /* Ignore invalid preferences. */ }
-        message = { action: 'load', snapshot, settings };
-      } else {
-        await request('heartbeat', {});
-        if (ended) return;
-      }
-      const data = await new Promise((resolve, reject) => {
-        const id = ++requestId;
-        pending = { id, resolve, reject };
-        worker.postMessage({ ...message, id });
-      });
-      if (data && !ended) {
-        try { sessionStorage.setItem(`${storageKey}:comparison`, JSON.stringify(data.settings)); } catch { /* Storage may be disabled. */ }
+      while (!ended && (reloadRequested || commands.length || queuedView)) {
+        let command;
+        if (reloadRequested) {
+          reloadRequested = false;
+          const fetchedView = viewVersion;
+          const fetchStart = performance.now(), snapshot = await request('snapshot');
+          if (ended || !snapshot) return;
+          perf?.add('snapshot.fetch', performance.now() - fetchStart);
+          for (const metric of snapshot.metrics || []) perf?.add(metric.phase, metric.ms, { bytes: metric.bytes });
+          wantedGeneration = Math.max(wantedGeneration, snapshot.generation || 0);
+          let settings;
+          try { settings = JSON.parse(sessionStorage.getItem(`${storageKey}:comparison`)); } catch { /* Ignore invalid preferences. */ }
+          if (settings?.generation !== snapshot.generation) {
+            settings = undefined;
+            if (fetchedView === viewVersion) { view = { ...view, query: '', page: 0 }; emit({ type: 'snapshot-replacing' }); }
+          }
+          command = { action: 'load', snapshot, settings, view };
+        } else if (commands.length) command = commands.shift();
+        else command = { action: 'view', view };
+        queuedView = false;
+        const sentView = viewVersion;
+        ensureWorker();
+        const data = await new Promise((resolve, reject) => {
+          const id = ++requestId;
+          pending = { id, resolve, reject, started: performance.now() };
+          worker.postMessage({ ...command, view, id, profile: !!perf });
+        });
+        if (!data || ended) return;
+        loadedGeneration = data.generation;
+        if (data.generation < wantedGeneration) continue;
+        if (command.action === 'load') reloadRequested = false;
+        if (sentView !== viewVersion) continue;
+        view = { ...data.viewState };
+        if (perf) perf.result = { request: requestId, generation: data.generation, workers: perf.workerStarts,
+          ok: !!data.result && !data.error, rows: data.pageInfo?.totalRows ?? data.result?.rows.length,
+          transmittedRows: data.result?.rows.length, transmittedCells: data.result?.rows.reduce((sum, row) => sum + row.cells.length, 0),
+          columns: data.result?.fields.length, counts: data.result?.counts, sheets: data.sheets?.length || 0,
+          sheetErrors: data.sheets?.filter(sheet => sheet.error).length || 0 };
+        try { sessionStorage.setItem(`${storageKey}:comparison`, JSON.stringify({ ...data.settings, generation: data.generation })); } catch { /* Storage may be disabled. */ }
         current = data; emit(data);
       }
     } catch (error) {
       if (current && !ended) emit(current);
       if (!ended) showError(error.message);
-    } finally { busy = false; }
+    } finally {
+      busy = false;
+      if (!ended && (reloadRequested || commands.length || queuedView)) queueMicrotask(() => { void update(); });
+    }
   }
   function element(tag, text) {
     const node = document.createElement(tag);
@@ -180,15 +246,24 @@
     },
     postMessage(message) {
       if (ended) return;
+      if (message.action === 'view-pending') {
+        view = { ...message.view }; viewVersion++; queuedView = true; return;
+      }
       if (message.action === 'ready') {
-        void update();
+        events = new EventSource('events');
+        events.onmessage = event => {
+          const generation = Number(event.data);
+          if (Number.isSafeInteger(generation) && generation > 0) void update({ action: 'load-latest', generation });
+        };
+        events.onerror = () => { void request('heartbeat', {}).catch(error => showError(error.message)); };
+        void update(message);
         heartbeat = setInterval(() => { void request('heartbeat', {}).catch(error => {
           clearInterval(heartbeat); showError(error.message);
         }); }, 30000);
       } else if (message.action === 'format') chooseFormat();
       else if (message.action === 'keys') chooseKeys();
       else if (message.action === 'close') void close();
-      else if (['swap', 'sheet', 'refresh'].includes(message.action)) void update(message);
+      else if (['swap', 'sheet', 'refresh', 'view'].includes(message.action)) void update(message);
     }
   };
 })();

@@ -25,7 +25,7 @@ const server = http.createServer((request, response) => {
   } else if (request.url === '/theme.css') {
     response.setHeader('Content-Type', 'text/css');
     response.end(':root { --vscode-editor-background:#1e1e1e;--vscode-editor-foreground:#ddd;--vscode-descriptionForeground:#aaa;--vscode-panel-border:#444;--vscode-sideBar-background:#252526;--vscode-list-hoverBackground:#303033;--vscode-input-background:#333;--vscode-input-foreground:#ddd;--vscode-gitDecoration-addedResourceForeground:#81b88b;--vscode-gitDecoration-deletedResourceForeground:#d9919b;--vscode-gitDecoration-modifiedResourceForeground:#d9b476; }');
-  } else if (['/media/main.js', '/media/main.css'].includes(request.url)) {
+  } else if (['/media/main.js', '/media/main.css', '/media/view.js'].includes(request.url)) {
     response.setHeader('Content-Type', request.url.endsWith('.js') ? 'text/javascript' : 'text/css');
     response.end(fs.readFileSync(path.join(root, request.url)));
   } else { response.writeHead(404); response.end(); }
@@ -50,6 +50,13 @@ const server = http.createServer((request, response) => {
       return page.locator('tbody tr').filter({ has: page.locator('.record-id').filter({ hasText: new RegExp(`^id  ${id}$`) }) }).locator('td').nth(fields.indexOf(field));
     };
     await send(payload);
+    await page.evaluate(() => { window.previousTable = document.querySelector('#content').firstChild; });
+    await send({ ...payload, busy: true });
+    assert.ok(await page.evaluate(() => window.previousTable === document.querySelector('#content').firstChild), 'busy must preserve table DOM');
+    assert.equal(await page.locator('#keys').isDisabled(), true);
+    await send({ ...payload, busy: false });
+    assert.ok(await page.evaluate(() => window.previousTable === document.querySelector('#content').firstChild), 'busy recovery must preserve table DOM');
+    assert.equal(await page.locator('#keys').isDisabled(), false);
     const price = await cell('100101', 'price');
     assert.ok((await price.innerText()).includes('+20'));
     assert.equal(await price.locator('.before').count(), 1);
@@ -272,21 +279,23 @@ const server = http.createServer((request, response) => {
     const typedTable = async rows => worksheetTable((await readWorkbook(await workbook({ Data: rows })))[0]);
     const xlsx = compareTables(await typedTable([['id', 'typed', 'formula'], ['1', 1, { formula: '1+1', result: 2 }]]),
       await typedTable([['id', 'typed', 'formula'], ['1', '1', { formula: '2*1', result: 2 }], ['2', '<script>bad()</script>', { formula: 'TODAY()' }]]));
-    await send({ ...payload, title: 'XLSX 类型与公式', sources: ['旧版本.xlsx', '新版本.xlsx'], revision: 16, xlsx: true, result: xlsx, sheetName: 'Data',
+    await send({ ...payload, title: 'XLSX 类型与公式结果', sources: ['旧版本.xlsx', '新版本.xlsx'], revision: 16, xlsx: true, result: xlsx, sheetName: 'Data',
       sheets: [{ name: 'Data', status: 'common', counts: xlsx.counts }, { name: '删除表', status: 'removed', counts: { added: 0, removed: 1, modified: 0 } }] });
     assert.equal(await page.locator('[data-action="native"]').isVisible(), false);
     assert.equal(await page.getByLabel('工作表', { exact: true }).isVisible(), true);
     const typed = await cell('1', 'typed');
     assert.match(await typed.innerText(), /数字/); assert.match(await typed.innerText(), /文本/);
+    await page.locator('#only-fields').uncheck();
     const formula = await cell('1', 'formula');
-    assert.match(await formula.innerText(), /=1\+1/); assert.match(await formula.innerText(), /=2\*1/);
-    assert.match(await (await cell('2', 'formula')).innerText(), /无缓存结果/);
+    assert.match(await formula.innerText(), /2/);
+    assert.doesNotMatch(await formula.innerText(), /=1\+1|=2\*1/);
+    assert.doesNotMatch(await (await cell('2', 'formula')).innerText(), /TODAY/);
     assert.equal(await page.locator('#content script').count(), 0);
     await page.getByLabel('工作表', { exact: true }).selectOption('删除表');
     assert.deepEqual(await page.evaluate(() => window.messages.at(-1)), { action: 'sheet', name: '删除表' });
     await page.getByLabel('工作表', { exact: true }).selectOption('Data');
     await page.getByRole('searchbox').fill('2*1');
-    await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 1);
+    await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 0);
     await page.getByRole('searchbox').fill('');
     await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 2);
     await page.screenshot({ path: path.join(root, 'dist/gridiff-xlsx.png'), fullPage: true });

@@ -1,5 +1,8 @@
 'use strict';
 
+// Empty XLSX cells share immutable metadata to avoid cloning one object per blank cell.
+const emptyMetadata = Object.freeze({ type: 'empty', raw: null });
+
 // Values stay strings: leading zeros, large IDs, whitespace and empty cells are significant.
 function parseCSV(text) {
   text = text.replace(/^\uFEFF/, '');
@@ -89,7 +92,7 @@ function readTableRows(rows, options = {}, metadata) {
   }
   const data = rows.slice(start - 1).map((row, i) => ({
     record: start + i, values: fields.map((_, j) => row[j] ?? ''),
-    ...(metadata ? { metadata: fields.map((_, j) => metadata[start + i - 1]?.[j] ?? { type: 'empty', raw: null }) } : {})
+    ...(metadata ? { metadata: fields.map((_, j) => metadata[start + i - 1]?.[j] ?? emptyMetadata) } : {})
   }));
   return { format, fields, skippedBlankRows: data.filter(row => row.values.every(value => value === '')).length,
     rows: data.filter(row => row.values.some(value => value !== '')) };

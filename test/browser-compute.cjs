@@ -12,8 +12,12 @@ const { workbook } = require('./xlsx-fixtures');
 const root = path.resolve(__dirname, '..');
 const packed = path.join(root, 'cli/assets/worker.js.gz');
 assert.ok(fs.existsSync(packed), 'Run npm run build:cli to prepare the browser worker');
-const code = gunzipSync(fs.readFileSync(packed));
-const comparable = value => Object.fromEntries(['result', 'error', 'options', 'xlsx', 'sheets', 'sheetName', 'skipped', 'keyFields'].filter(key => value[key] !== undefined).map(key => [key, value[key]]));
+const code = `const OriginalWorker = Worker;
+self.Worker = class extends OriginalWorker {
+  constructor(...args) { super(...args); self.postMessage({ testHelper: 'start' }); }
+  terminate() { super.terminate(); if (!this.stopped) { this.stopped = true; self.postMessage({ testHelper: 'stop' }); } }
+};\n` + gunzipSync(fs.readFileSync(packed)).toString();
+const comparable = value => Object.fromEntries(['result', 'error', 'options', 'xlsx', 'sheets', 'sheetName', 'sheetSelection', 'skipped', 'keyFields'].filter(key => value[key] !== undefined).map(key => [key, value[key]]));
 
 (async () => {
   const server = http.createServer((request, response) => {
@@ -25,7 +29,10 @@ const comparable = value => Object.fromEntries(['result', 'error', 'options', 'x
   const page = await browser.newPage();
   try {
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    const start = () => page.evaluate(() => { window.testWorker?.terminate(); window.testWorker = new Worker('worker.js', { type: 'module' }); window.requestId = 0; });
+    const start = () => page.evaluate(() => {
+      window.testWorker?.terminate(); window.testWorker = new Worker('worker.js', { type: 'module' }); window.requestId = 0; window.helperEvents = [];
+      window.testWorker.addEventListener('message', ({ data }) => { if (data.testHelper) window.helperEvents.push(data.testHelper); });
+    });
     const send = message => page.evaluate(message => new Promise((resolve, reject) => {
       const id = ++window.requestId;
       const timer = setTimeout(() => reject(new Error('Worker timed out')), 20000);
@@ -36,15 +43,16 @@ const comparable = value => Object.fromEntries(['result', 'error', 'options', 'x
       };
       window.testWorker.addEventListener('message', listener);
       window.testWorker.onerror = event => { clearTimeout(timer); reject(new Error(event.message)); };
-      window.testWorker.postMessage({ ...message, id });
+      window.testWorker.postMessage({ ...(message.action === 'load' ? { view: { onlyChanges: false, onlyFields: false } } : {}), ...message, id });
     }), message);
-    const compare = async (inputs, xlsx = false) => {
+    const compare = async (inputs, xlsx = false, sheetSelection = { mode: 'all' }) => {
       const node = createComparison({ xlsx, workbookReader: readWorkbook });
-      await node.load(inputs);
-      const snapshot = { sources: ['before', 'after'], title: 'after', xlsx, inputs: inputs.map(value => xlsx ? value.toString('base64') : value) };
+      await node.load(inputs, sheetSelection);
+      const snapshot = { sources: ['before', 'after'], title: 'after', xlsx, sheetSelection, inputs: inputs.map(value => xlsx ? value.toString('base64') : value) };
       await start();
       const initial = await send({ action: 'load', snapshot });
       assert.equal(initial.error, undefined);
+      assert.equal(initial.metrics, undefined);
       assert.deepEqual(comparable(initial.data), comparable(node.snapshot()));
       return { node, snapshot, initial: initial.data };
     };
@@ -81,8 +89,17 @@ const comparable = value => Object.fromEntries(['result', 'error', 'options', 'x
       book.getWorksheet('Data').getCell('D2').numFmt = 'yyyy-mm-dd';
     });
     const xlsx = await compare([await make(false, false), await make(true, true)], true);
-    xlsx.node.selectSheet('Other');
-    assert.deepEqual(comparable((await send({ action: 'sheet', name: 'Other' })).data), comparable(xlsx.node.snapshot()));
+    await start();
+    const profiled = await send({ action: 'load', snapshot: xlsx.snapshot, profile: true });
+    assert.deepEqual(await page.evaluate(() => window.helperEvents), ['start', 'stop'], 'real helper is cleaned up after cloning');
+    assert.equal(profiled.metrics.filter(metric => metric.phase === 'xlsx.parallel' && metric.workers === 2).length, 1);
+    assert.equal(profiled.metrics.filter(metric => metric.phase === 'xlsx.load').length, 2);
+    assert.equal(profiled.metrics.filter(metric => metric.phase === 'worker.compute').length, 1, 'helper timing must not masquerade as the coordinator total');
+    assert.equal(profiled.metrics.filter(metric => metric.phase === 'table.compare').length, 3, 'all mode computes every worksheet');
+    xlsx.node.selectSheet('Data');
+    const selected = await send({ action: 'sheet', name: 'Data', profile: true });
+    assert.deepEqual(comparable(selected.data), comparable(xlsx.node.snapshot()));
+    assert.equal(selected.metrics.filter(metric => metric.phase === 'table.compare').length, 0, 'switching uses cached sheets');
     xlsx.node.selectSheet('Duplicate');
     assert.deepEqual(comparable((await send({ action: 'sheet', name: 'Duplicate' })).data), comparable(xlsx.node.snapshot()));
     xlsx.node.update({ alignment: 'position' });
@@ -91,7 +108,26 @@ const comparable = value => Object.fromEntries(['result', 'error', 'options', 'x
     await start();
     const restoredSheet = await send({ action: 'load', snapshot: xlsx.snapshot, settings: perSheet.data.settings });
     assert.deepEqual(comparable(restoredSheet.data), comparable(xlsx.node.snapshot()));
+    const duplicateRows = [['id', 'value'], ['1', 1], ['1', 2]];
+    const renamed = await compare([await workbook({ Old: duplicateRows }), await workbook({ New: duplicateRows })], true, { mode: 'first' });
+    renamed.node.update({ alignment: 'position' });
+    await send({ action: 'options', options: { alignment: 'position' } });
+    renamed.node.swap();
+    const renamedSwap = await send({ action: 'swap' });
+    assert.deepEqual(comparable(renamedSwap.data), comparable(renamed.node.snapshot()));
+    await start();
+    const renamedRestored = await send({ action: 'load', snapshot: renamed.snapshot, settings: renamedSwap.data.settings });
+    assert.deepEqual(comparable(renamedRestored.data), comparable(renamed.node.snapshot()));
     await compare([Buffer.alloc(0), await workbook({ Added: [['id'], ['1']] })], true);
+    assert.deepEqual(await page.evaluate(() => window.helperEvents), [], 'empty side requires no helper');
+    await start();
+    const badPair = await send({ action: 'load', snapshot: { ...xlsx.snapshot, inputs: [xlsx.snapshot.inputs[0], Buffer.from('invalid xlsx').toString('base64')] } });
+    assert.match(badPair.data.error, /无法读取 XLSX/);
+    assert.deepEqual(await page.evaluate(() => window.helperEvents), ['start', 'stop']);
+    const recoveredPair = await send({ action: 'load', snapshot: xlsx.snapshot });
+    assert.equal(recoveredPair.error, undefined);
+    assert.ok(recoveredPair.data.sheets.some(sheet => sheet.name === 'Data' && !sheet.error));
+    assert.deepEqual(await page.evaluate(() => window.helperEvents), ['start', 'stop', 'start', 'stop']);
     await compare([await workbook({ Unsafe: [['id', 'value'], ['1', 9007199254740992]] }), Buffer.alloc(0)], true);
     await compare(['all,int32,None,无,0\nall,int32,All,所有,1', 'all,int32,None,无,0\ngo,int32,All,所有,2']);
 

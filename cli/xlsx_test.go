@@ -11,6 +11,10 @@ import (
 
 func workbookZIP(t *testing.T, entries map[string][]byte) []byte {
 	t.Helper()
+	if string(entries["xl/workbook.xml"]) == `<workbook/>` && entries["xl/worksheets/sheet1.xml"] != nil {
+		entries["xl/workbook.xml"] = []byte(`<workbook xmlns="` + spreadsheetNS + `" xmlns:r="` + relationshipNS + `"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>`)
+		entries["xl/_rels/workbook.xml.rels"] = []byte(`<Relationships xmlns="` + packageRelationshipNS + `"><Relationship Id="rId1" Type="` + relationshipNS + `/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`)
+	}
 	var out bytes.Buffer
 	w := zip.NewWriter(&out)
 	for name, data := range entries {
@@ -89,7 +93,41 @@ func TestArchiveRejectsDuplicateMissingWorkbookAndExpansion(t *testing.T) {
 	data := workbookZIP(t, map[string][]byte{"xl/workbook.xml": []byte(`<workbook/>`)})
 	central := bytes.Index(data, []byte{'P', 'K', 1, 2})
 	binary.LittleEndian.PutUint32(data[central+24:central+28], maxExpanded+1)
-	if err := validateArchive(data); err == nil || !strings.Contains(err.Error(), "64 MiB") {
+	if err := validateArchive(data); err == nil || !strings.Contains(err.Error(), "128 MiB") {
 		t.Fatal("declared expansion budget missing", err)
+	}
+}
+
+func TestArchiveAllowsExpandedXMLAbove64MiB(t *testing.T) {
+	var out bytes.Buffer
+	w := zip.NewWriter(&out)
+	part, err := w.Create("xl/workbook.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = part.Write([]byte(`<workbook/>`)); err != nil {
+		t.Fatal(err)
+	}
+	part, err = w.Create("customXml/item1.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = part.Write([]byte(`<data>`)); err != nil {
+		t.Fatal(err)
+	}
+	chunk := bytes.Repeat([]byte{'x'}, 64*1024)
+	for i := 0; i < 1024; i++ {
+		if _, err = part.Write(chunk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = part.Write([]byte(`</data>`)); err != nil {
+		t.Fatal(err)
+	}
+	if err = w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = validateArchive(out.Bytes()); err != nil {
+		t.Fatal(err)
 	}
 }

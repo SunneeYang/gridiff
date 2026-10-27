@@ -26,6 +26,7 @@ const { workbook } = require('./xlsx-fixtures');
       'group,key,value\ng,a,new\ng,b,same\ny,d,<img src=x onerror=alert(1)>\n'
     ]);
     await page.goto(csv.url);
+    assert.equal(await page.evaluate(() => typeof window.gridiffPerf), 'undefined');
     await page.locator('#error:not([hidden])').waitFor();
     assert.match(await page.locator('#error').innerText(), /重复/);
     assert.equal(await page.locator('[data-action=native]').isVisible(), false);
@@ -76,15 +77,16 @@ const { workbook } = require('./xlsx-fixtures');
 
     const xlsx = await start('xlsx', [
       await workbook({ Data: [['id', 'value'], ['1', { formula: '1+1', result: 2 }]] }),
-      await workbook({ Data: [['id', 'value'], ['1', { formula: '2*1', result: 2 }]], Extra: [['id', 'value'], ['2', 'new sheet']] })
+      await workbook({ Data: [['id', 'value'], ['1', { formula: '2+1', result: 3 }]], Extra: [['id', 'value'], ['2', 'new sheet']] })
     ]);
     await page.goto(xlsx.url);
-    await page.waitForFunction(() => document.querySelectorAll('#sheet option').length === 2);
-    assert.ok((await page.locator('#content').innerText()).includes('1+1'));
-    assert.ok((await page.locator('#content').innerText()).includes('2*1'));
-    await page.locator('#sheet').selectOption('Extra');
-    await page.waitForFunction(() => document.querySelector('#content').textContent.includes('new sheet'));
-    assert.equal(await page.locator('tbody tr.added').count(), 1);
+    await page.waitForFunction(() => document.querySelectorAll('#sheet option').length === 1);
+    await page.waitForFunction(() => document.querySelector('tbody tr.modified'));
+    assert.ok((await page.locator('#content').innerText()).includes('2'));
+    assert.ok((await page.locator('#content').innerText()).includes('3'));
+    assert.ok(!(await page.locator('#content').innerText()).includes('1+1'));
+    assert.ok(!(await page.locator('#content').innerText()).includes('2+1'));
+    assert.ok(!(await page.locator('#content').innerText()).includes('new sheet'));
     assert.equal(await page.locator('#search').inputValue(), '');
     await page.getByRole('button', { name: '结束比较', exact: true }).click();
     await xlsx.closed;
@@ -101,11 +103,24 @@ const { workbook } = require('./xlsx-fixtures');
     await page.getByRole('button', { name: '结束比较', exact: true }).click();
     await vertical.closed;
 
+    for (const extension of ['txt', 'png', 'tmp']) {
+      const unsupported = await start(extension, ['id,value\n1,a', Buffer.from([0, 255, 1])]);
+      await page.goto(unsupported.url);
+      await page.locator('#error:not([hidden])').waitFor();
+      const message = await page.locator('#error').innerText();
+      assert.match(message, /不支持/); assert.match(message, /\.csv/); assert.match(message, /\.xlsx/);
+      assert.doesNotMatch(message, /可调整/);
+      assert.equal(await page.locator('table').count(), 0);
+      assert.equal(await page.locator('#keys').isDisabled(), true);
+      assert.equal(await page.locator('#format').isDisabled(), true);
+      await page.getByRole('button', { name: '结束比较', exact: true }).click();
+      await unsupported.closed;
+    }
+
     const expired = await start('csv', ['id,value\n1,a', 'id,value\n1,b']);
     await page.goto(expired.url);
     await page.locator('tr.modified').waitFor();
     await expired.close();
-    await page.getByRole('button', { name: '重新计算', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('#title').textContent === '比较已结束');
     assert.ok((await page.locator('#notice').innerText()).includes('重新打开比较'));
     assert.equal(await page.locator('button:enabled').count(), 0);

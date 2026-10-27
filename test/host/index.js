@@ -86,7 +86,7 @@ async function run() {
     assert.deepEqual(await readHeadWorkbook(git, repository, bookUri), oldBook, 'HEAD returns unconverted XLSX bytes');
     const before = await readWorkbook(await readHeadWorkbook(git, repository, bookUri));
     const after = await readWorkbook(await vscode.workspace.fs.readFile(bookUri));
-    assert.equal(compareTables(worksheetTable(before[0]), worksheetTable(after[0])).counts.modified, 1);
+    assert.equal(compareTables(worksheetTable(before[0]), worksheetTable(after[0])).counts.modified, 0);
     await vscode.commands.executeCommand('gridiff.compareHead', bookUri);
     await waitForTab(vscode.TabInputWebview);
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor');

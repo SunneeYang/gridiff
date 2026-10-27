@@ -77,7 +77,7 @@ async function build(args, { root = path.resolve(__dirname, '..'), log = console
     minify: true, write: false, metafile: true, define: { 'process.env.NODE_ENV': '"production"' } });
   if (!bundled.success) throw new AggregateError(bundled.logs, '无法构建浏览器计算脚本。');
   const notices = collectNotices(packageDirectories(Object.keys(bundled.metafile.inputs), root), root, fs.readFileSync(goLicense, 'utf8'));
-  const assets = Object.fromEntries(['main.js', 'main.css', 'browser.js', 'themes.js', 'themes.css'].map(name => [name, fs.readFileSync(path.join(root, 'media', name), 'utf8')]));
+  const assets = Object.fromEntries(['main.js', 'main.css', 'browser.js', 'view.js', 'themes.js', 'themes.css'].map(name => [name, fs.readFileSync(path.join(root, 'media', name), 'utf8')]));
   assets['worker.js'] = await bundled.outputs[0].text();
   assets['index.html'] = pageHTML({ resource: name => name, browser: true,
     csp: "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'" });
@@ -92,7 +92,7 @@ async function build(args, { root = path.resolve(__dirname, '..'), log = console
     for (const target of selected) {
       const [platform, arch] = target.split('-'), filename = platform === 'windows' ? 'gridiff.exe' : 'gridiff';
       const executable = path.join(temporary, `gridiff-${target}${platform === 'windows' ? '.exe' : ''}`);
-      run('go', ['build', '-trimpath', '-buildvcs=false', '-ldflags', `-s -w -X main.version=${version}`, '-o', executable, '.'], {
+      run('go', ['build', '-trimpath', '-buildvcs=false', '-ldflags', `-s -w -X main.version=${version} -X main.buildID=${buildInputsSha256}`, '-o', executable, '.'], {
         cwd: path.join(root, 'cli'), env: { ...process.env, CGO_ENABLED: '0', GOOS: platform === 'windows' ? 'windows' : platform, GOARCH: arch === 'x64' ? 'amd64' : arch }
       });
       if (buildInputsHash(path.join(root, 'cli')) !== buildInputsSha256) throw new Error('构建期间输入发生变化，请重新构建全部平台。');

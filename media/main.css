@@ -28,7 +28,7 @@ button, input, select { font: inherit; color: inherit; }
 select { max-width: 360px; background: var(--input); color: var(--input-fg); border: 1px solid var(--line); padding: 6px; border-radius: 3px; }
 select:focus-visible { outline: 2px solid var(--focus); }
 [hidden] { display: none !important; }
-.cell-meta, .formula { display: block; font-size: 11px; overflow-wrap: anywhere; }
+.cell-meta { display: block; font-size: 11px; overflow-wrap: anywhere; }
 .cell-meta { color: var(--muted); }
 button { background: transparent; border: 1px solid var(--line); padding: 6px 10px; border-radius: 3px; cursor: pointer; white-space: nowrap; }
 button:hover { background: var(--hover); }

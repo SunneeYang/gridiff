@@ -1,11 +1,22 @@
 'use strict';
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-async function startComparisonServer({ files, binary: explicitBinary } = {}) {
+const { promisify } = require('node:util');
+const execFile = promisify(require('node:child_process').execFile);
+
+async function submitComparison({ files, binary, runtimeDirectory, args = [] }) {
+  const { stdout } = await execFile(binary, ['--no-open', ...args, ...files], {
+    env: { ...process.env, GRIDIFF_RUNTIME_DIR: runtimeDirectory }, timeout: 60000
+  });
+  const url = stdout.trim();
+  if (!/^http:\/\/127\.0\.0\.1:\d+\/s\/[a-f0-9]+\/$/.test(url)) throw new Error('Invalid reusable server URL');
+  return url;
+}
+async function startComparisonServer({ files, binary: explicitBinary, args = [] } = {}) {
   const platform = process.platform === 'win32' ? 'windows' : process.platform;
   const filename = process.platform === 'win32' ? 'gridiff.exe' : 'gridiff';
   const binary = explicitBinary || process.env.GRIDIFF_BINARY || path.join(__dirname, '..', 'dist', 'cli', `gridiff-${platform}-${process.arch}`, filename);
-  const child = spawn(binary, ['diff', '--no-open', '--wait', ...files], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(binary, ['diff', '--no-open', '--wait', ...args, ...files], { stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
   child.stderr.on('data', chunk => { stderr += chunk; });
   const closed = new Promise(resolve => child.once('close', resolve));
@@ -32,4 +43,4 @@ async function startComparisonServer({ files, binary: explicitBinary } = {}) {
   };
   return { url, origin: new URL(url).origin, closed, close };
 }
-module.exports = { startComparisonServer };
+module.exports = { startComparisonServer, submitComparison };

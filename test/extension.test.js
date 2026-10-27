@@ -106,7 +106,7 @@ function harness({ startup = false, auto = true } = {}) {
   const subscriptions = [];
   load('extension.js').activate({ extensionUri: Uri.file('/extension'), subscriptions });
   if (!startup) group.activeTab = initialTab;
-  return { vscode, commands, documents, panels, errors, native, picks, repository, left, right, initialTab, controls,
+  return { vscode, commands, documents, panels, errors, native, picks, repository, left, right, initialTab, controls, defaults,
     openDiff, closeTab, activateTab, emitGroups: () => groupsChanged.fire({ opened: [], changed: [group], closed: [] }),
     setAuto: enabled => { defaults.autoOpenDiff = enabled; configChanged.fire({ affectsConfiguration: key => key === 'gridiff.autoOpenDiff' }); },
     dispose: () => subscriptions.forEach(item => item.dispose()),
@@ -182,35 +182,39 @@ test('binary replacement during pinning can finish opening instead of inheriting
   assert.equal(h.panels.length, 1);
 });
 
-test('XLSX file comparison selects sheets by name, preserves order and refreshes swapped snapshots', async () => {
-  const h = harness();
+test('XLSX file comparison pairs first sheets and refreshes swapped snapshots', async () => {
+  const h = harness(); h.defaults.xlsxSheets = 'first';
   const left = h.vscode.Uri.file('/repo/old.xlsx'), right = h.vscode.Uri.file('/repo/new.xlsx');
-  h.documents.set(left.toString(), await workbook({ Data: [['id', 'v'], ['1', 'old']], Deleted: [['id', 'v'], ['x', 1]], Stable: [['id'], ['1']] }));
-  h.documents.set(right.toString(), await workbook({ Stable: [['id'], ['1']], Data: [['id', 'v'], ['1', 'new']], Added: [['id'], ['2']] }));
+  h.documents.set(left.toString(), await workbook({ Data: [['id', 'v'], ['1', 'old']], Deleted: [['id'], ['x']] }));
+  h.documents.set(right.toString(), await workbook({ Renamed: [['id', 'v'], ['1', 'new']], Data: [['id'], ['ignored']] }));
   h.vscode.workspace.openTextDocument = () => { throw new Error('XLSX must not use text decoding'); };
   await h.commands.get('gridiff.compareFiles')(left, [left, right]);
   assert.equal(h.latest().error, ''); assert.equal(h.latest().xlsx, true);
-  assert.equal(h.latest().sheetName, 'Data');
-  assert.deepEqual(h.latest().sheets.map(s => s.name), ['Stable', 'Data', 'Added', 'Deleted']);
-  assert.equal(h.latest().sheets[2].counts.added, 1); assert.equal(h.latest().sheets[3].counts.removed, 1);
+  assert.equal(h.latest().sheetName, 'Renamed');
+  assert.deepEqual(h.latest().sheets.map(s => s.name), ['Renamed']);
+  assert.equal(h.latest().result.counts.modified, 1);
   await h.send({ action: 'sheet', name: 'Deleted' });
-  assert.equal(h.latest().result.rows[0].status, 'removed');
-  await h.send('swap'); assert.equal(h.latest().result.rows[0].status, 'added');
-  await h.send('refresh'); assert.equal(h.latest().result.rows[0].status, 'added');
+  assert.equal(h.latest().sheetName, 'Renamed');
+  await h.send('swap'); assert.equal(h.latest().result.rows[0].cells[1].after, 'old');
+  await h.send('refresh'); assert.equal(h.latest().result.rows[0].cells[1].after, 'old');
   await h.send('native'); assert.equal(h.native.filter(call => call[0] === 'vscode.diff').length, 0);
-  await h.send({ action: 'sheet', name: 'unknown' }); assert.equal(h.latest().sheetName, 'Deleted');
+  await h.send({ action: 'sheet', name: 'unknown' }); assert.equal(h.latest().sheetName, 'Data');
 });
 
-test('XLSX sheet errors are isolated and per-sheet alignment survives switching', async () => {
-  const h = harness(), uri = h.vscode.Uri.file('/repo/book.xlsx');
-  h.documents.set(uri.toString(), await workbook({ Good: [['id', 'v'], ['1', 2]], Duplicate: [['id', 'v'], ['1', 2], ['1', 3]] }));
-  await h.commands.get('gridiff.compareFiles')(uri, [uri, uri]);
-  assert.equal(h.latest().sheetName, 'Duplicate'); assert.match(h.latest().error, /重复/);
+test('XLSX first-sheet alignment correction survives renamed-sheet swap and refresh', async () => {
+  const h = harness(), left = h.vscode.Uri.file('/repo/old.xlsx'), right = h.vscode.Uri.file('/repo/new.xlsx');
+  h.defaults.xlsxSheets = 'first';
+  const rows = [['id', 'v'], ['1', 2], ['1', 3]];
+  h.documents.set(left.toString(), await workbook({ Old: rows, Ignored: [['id'], ['1']] }));
+  h.documents.set(right.toString(), await workbook({ New: rows, Ignored: [['id'], ['2']] }));
+  await h.commands.get('gridiff.compareFiles')(left, [left, right]);
+  assert.equal(h.latest().sheetName, 'New'); assert.match(h.latest().error, /重复/);
   h.picks.push({ value: 'position' }); await h.send('keys');
   assert.equal(h.latest().error, '');
-  await h.send({ action: 'sheet', name: 'Good' }); assert.equal(h.latest().result.alignment, 'key');
-  await h.send({ action: 'sheet', name: 'Duplicate' }); assert.equal(h.latest().result.alignment, 'position');
+  await h.send('swap'); assert.equal(h.latest().result.alignment, 'position');
+  assert.equal(h.latest().sheetName, 'Old');
   await h.send('refresh'); assert.equal(h.latest().result.alignment, 'position');
+  await h.send('swap'); assert.equal(h.latest().result.alignment, 'position');
 });
 
 test('XLSX blocks mixed formats and oversized files before reading bytes', async () => {
@@ -350,4 +354,20 @@ test('manual reuse of a loading view cannot steal focus after switching tabs', a
   finishRead('id,v\n1,old'); await opening;
   assert.equal(h.vscode.window.tabGroups.activeTabGroup.activeTab, other);
   assert.equal(h.panels.length, 1);
+});
+
+test('plugin defaults to all worksheets and reloads first/named settings without a native dependency', async () => {
+  const h = harness(), uri = h.vscode.Uri.file('/repo/multiple.xlsx');
+  h.documents.set(uri.toString(), await workbook({ First: [['id'], ['1']], '中文, table': [['id'], ['2']], Last: [['id'], ['3']] }));
+  await h.commands.get('gridiff.compareFiles')(uri, [uri, uri]);
+  assert.deepEqual(h.latest().sheets.map(s => s.name), ['First', '中文, table', 'Last']);
+  assert.deepEqual(h.latest().sheetSelection, { mode: 'all' });
+  h.defaults.xlsxSheets = 'first'; await h.send('refresh');
+  assert.deepEqual(h.latest().sheets.map(s => s.name), ['First']);
+  h.defaults.xlsxSheets = 'named'; h.defaults.xlsxSheetNames = ['Last', '中文, table']; await h.send('refresh');
+  assert.deepEqual(h.latest().sheets.map(s => s.name), ['中文, table', 'Last']);
+  h.defaults.xlsxSheetNames = ['typo']; await h.send('refresh');
+  assert.match(h.latest().error, /两侧均找不到.*typo/);
+  h.defaults.xlsxSheets = 'all'; await h.send('refresh');
+  assert.equal(h.latest().error, ''); assert.equal(h.latest().sheets.length, 3);
 });

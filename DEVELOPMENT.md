@@ -18,9 +18,13 @@ npm run package
 
 ## 独立程序
 
-`cli/` 是仅依赖 Go 标准库的启动程序。它接收 Fork 的两个文件路径，读取有限大小的快照，在随机回环端口提供内嵌页面；默认通过后台子进程继续服务，父进程在读取完成后返回，`--wait` 则等待审阅结束。HTTP 校验 Host/Origin 和随机会话路径，不接受任意文件路径，也不提供写表格接口。XLSX 先在 Go 中执行 ZIP/XML 预检查，之后将原始字节交给浏览器，保留公式和缓存结果。
+`cli/` 是仅依赖 Go 标准库的启动程序。它接收 Fork 的两个文件路径，读取有限大小的快照，在随机回环端口提供内嵌页面；默认复用同一构建的后台服务，父进程在双侧快照读取完成后返回；`--wait` 使用独立前台服务并等待审阅结束。HTTP 校验 Host/Origin 和随机会话路径，网页接口不接受文件路径，也不提供写表格接口。CLI 通过独立控制令牌提交新路径，令牌不传给页面；SSE 通知页签读取新快照。用户缓存目录的私有发现记录按构建摘要区分实例，文件锁串行化启动与提交；记录只含回环地址和控制令牌，服务退出清理记录，锁文件保留。XLSX 先在 Go 中执行 ZIP/XML 预检查，校验时可同时缩短内存快照中的公式文本，再将更小的 XLSX 交给浏览器；比较只使用公式缓存结果，表达式不进入比较模型。
 
-`src/comparison.js`、`src/xlsx-core.js` 是 Web Worker 和 VS Code 扩展共用的比较逻辑；宿主注入工作簿读取函数。`media/worker-entry.js` 使用 ExcelJS 浏览器分发包解析 XLSX，格式、主键、交换、工作表和重算均在 Worker 内进行。`media/browser.js` 管理快照读取、Worker、设置对话框、心跳和结束。比较设置与筛选可存入标签的 sessionStorage，源数据不持久化。`src/page.js` 和主界面样式继续与插件共用。
+`src/comparison.js`、`src/xlsx-core.js` 是 Web Worker 和 VS Code 扩展共用的比较逻辑；宿主注入工作簿读取函数。`media/worker-entry.js` 使用 ExcelJS 浏览器分发包解析 XLSX，格式、主键、交换、工作表和重算均在 Worker 内进行。`media/browser.js` 管理快照读取、常驻 Worker、设置对话框、心跳和结束；请求按代次和最新视图串行处理，过期响应不覆盖新比较。比较设置与筛选可存入标签的 sessionStorage，源数据不持久化。`src/page.js` 和主界面样式继续与插件共用。
+
+独立入口仅按扩展名路由 CSV/XLSX；未知后缀和混合类型通过错误快照打开提示页，不读取文件内容。ExcelJS 仅在读取 XLSX 时初始化，仍打包在同一个 Worker 文件中。读取范围为 all/first/named；比较层缓存所选工作表的转换和结果，切表复用、改设置或重算失效当前表，重读/交换/失败清空；缓存表仍计入跨表预算。`media/view.js` 共享全表搜索、变动列并集和分页选择。浏览器 Worker 保留完整比较模型，只传当前页（最多 100 行）、字段及汇总；每行保留全部单元格以维持隐藏名称上下文。VS Code 仍在页面侧选择视图。页面在结果或分页 presentation 改变时重绘，busy 消息只更新操作状态。
+
+公式文本压缩与原始 XML 校验共用一次遍历：保留 `<f>` 标记、共享/数组属性及所有缓存值/样式，仅把普通公式文本缩成占位符，避免 ExcelJS 重复保存大量不会比较的表达式。CDATA、非工作表命名空间及 UTF-16 工作表保留原样。捕获 token 和工作表输出各限 8 MiB，超过后放弃该部件压缩、继续完整校验；公式压缩仅采用比原文件更小的 ZIP；剔除后续工作表的快照必须采用，不能因大小回退而恢复无关工作表。源文件不修改，不将此内部快照作为可编辑或导出的工作簿。`server.xlsx_validate` 包含校验与快照压缩耗时；`server.base64.bytes` 是实际传给页面的 ZIP 字节数。`test:xlsx-snapshot` 比较压缩前后的值、类型、日期、共享/数组公式、空缓存及 CDATA，并校验源文件字节未变。VS Code 宿主不压缩公式；选择 first/named 时，在校验和 ExcelJS 加载前剔除未选工作表。
 
 `media/themes.js` / `themes.css` 只在浏览器入口启用。系统模式监听 `prefers-color-scheme`；手动明暗覆盖系统变化。通过本地 preferences 接口将 `{mode,palette}` 保存为单一配置文件，macOS 位于 `~/Library/Application Support/gridiff/preferences.json`，Linux 使用 XDG 用户配置目录，Windows 使用用户 AppData。默认启动不写配置；手动修改采用临时文件加替换保存，失败会在页面提示。配色是各流行主题色板的表格界面适配，并保持差异语义与文字对比度。
 
@@ -31,6 +35,8 @@ npm run build:cli
 npm run test:go
 npm run test:worker
 npm run test:browser
+npm run test:reuse
+npm run test:xlsx-snapshot
 npm run test:themes
 npm run test:binary
 npm run build:cli -- --all
@@ -50,6 +56,25 @@ macOS/Linux 的 `gridiff` 和 Windows 的 `gridiff.cmd` 根据系统与 CPU 转�
 
 ## 验证
 
+### 性能基线
+
+先构建当前平台程序，再运行基准。使用临时目录 harness 时：
+
+```sh
+agent-tmp-run npm run build:cli
+agent-tmp-run npm run benchmark
+```
+
+对比保留的旧构建可传 `-- --binary /path/to/gridiff --case csv-tall --repeats 5`；程序旁须有原来的 `gridiff.json` 构建记录，脚本会核对 SHA-256。每次只跑一套基准，不要同时构建或执行其他测试。各轮基线和优化结果见 [PERFORMANCE.md](PERFORMANCE.md)。
+
+`scripts/benchmark.cjs` 生成 13 类确定性样本，默认各跑 3 次；可用 `-- --case csv-wide --repeats 1` 定位单个案例。覆盖普通/长/宽 CSV、密集和零变化、引号与中文多行长文本、增删重排、Mova 四行表头和竖表、带类型/日期/公式缓存的 XLSX、含多个工作表但仅比较首表的文件，以及稀疏区域。所有样本均在当前文件与单元格上限内。样本文件写入 harness 临时目录并清理，报告写入被忽略的 `dist/perf/`，包含实际执行程序的 SHA-256、构建来源、环境和每次阶段日志。
+
+加 `-- --reuse` 测量同服务、同页签、同 Worker 替换文件；暖替换从 CLI 启动前计时，直到新 generation 的双 requestAnimationFrame，并断言值互换、标题和单个常驻 Worker。冷启动分别记录服务启动、页面准备和导航；浏览器启动仅单独记录一次。`-- --reuse --case csv-tall --cycles 10 --repeats 1` 检查连续替换后的主页面保留堆；每轮强制 GC 会影响下一轮时序，不将该组耗时用于常规性能对比。GC 后主页面 V8 堆和 DOM 计数不包含 Worker、Go、RSS 或峰值。
+
+基准先断言预期行列数、增删修改和移动计数，再测量首次打开、重算、翻页、无匹配搜索；多表另测切表，宽表另测显示全部 400 列。每次使用新浏览器上下文，操作系统文件缓存未清空。外层耗时包含 Playwright 驱动等待，界面内部阶段日志更适合定位瓶颈。不要并行运行构建或其他测试来干扰基准。
+
+浏览器加 `#profile=1` 后启用阶段日志，页面及每次 Worker 响应最多保留 500 条；默认不启用。Go 快照始终附带少量阶段耗时和字节数，不持久化。`worker.transfer` 是 Worker 准备发送到主线程收到的时间，包含结构克隆、调度和接收；`worker.roundtrip` 还包含请求传入和首次 Worker 初始化。`render.frame` 使用两次 requestAnimationFrame 估计下一可呈现帧，不是精确像素绘制时间。阶段存在嵌套和双侧并行，不能把所有阶段相加当成总耗时。`xlsx.parallel` 是双 Worker 解析与结果接收的整体耗时，`xlsx.transfer` 包含辅助 Worker 结果克隆及调度；辅助侧解析指标带 `side: 1`，不会重复计入常驻 `worker.compute`。Chrome 的 `performance.memory` 仅为非标准 JS 堆估计，可能遗漏或共享部分堆，不代表进程 RSS 或峰值内存。日志不输出表格内容、路径、工作表名或搜索词。
+
 - `test/core.test.js` 和 `test/extension.test.js` 验证 CSV、记录对齐、比较结果和 VS Code 交互。
 - `test/xlsx.test.js` 动态生成工作簿，验证类型、公式缓存、日期系统、格式、合并格、表头和读取限制；`test/git.test.js` 验证原始二进制 Git 对象读取。
 - `test/ui.cjs` 默认使用已安装的 Chrome；可用 `PLAYWRIGHT_CHANNEL` 选择其他 Playwright 浏览器通道。验证两种视图、筛选、分页、长文本、安全文本展示、滚动及浅色/深色布局。
@@ -67,11 +92,11 @@ macOS/Linux 的 `gridiff` 和 Windows 的 `gridiff.cmd` 根据系统与 CPU 转�
 
 页面先过滤记录，再按原顺序分页。每页行数为 `max(1, min(100, floor(3000 / max(1, 显示字段数))))`；固定记录标识列不计入字段数。这是固定限制，不是动态性能检测。
 
-CSV 比较始终保留原字符串。XLSX 的显示字符串与类型、原始值、公式分开保存；主键使用类型和缓存值，值比较另外包含公式表达式。数值增减提示跳过超出安全精度的值；百分比以旧值绝对值为分母，旧值为零时省略。文件内容不写入 Webview 持久状态。
+CSV 比较始终保留原字符串。XLSX 的显示字符串与类型、原始值分开保存；主键和值比较使用类型和缓存值，公式表达式不进入比较模型，缺少缓存时视为空值。独立浏览器版的 Go 快照使用两个 goroutine 并行校验/压缩和编码，两侧完成后按左到右归并结果及日志，失败清空两侧快照。浏览器注入 `workbookPairReader`：两侧非空时，常驻 Worker 解析左侧，临时 Worker 解析右侧，右侧原始字节通过 ArrayBuffer 转移；接收完整结果后立即终止临时 Worker。失败路径也清理 Worker，并等待本地解析结束后再处理后续请求。单侧为空时不创建辅助 Worker；VS Code 的单线程宿主继续依次读取。Go 到页面及页面到常驻 Worker 仍使用现有 Base64 快照传输。数值增减提示跳过超出安全精度的值；百分比以旧值绝对值为分母，旧值为零时省略。文件内容不写入 Webview 持久状态。
 
 `mova-vertical` 与 CSV/XLSX 共用 `readTableRows`：保留源行，以第三列 `name` 对齐，固定前五列为导出标记、类型、名称、说明、值，额外列保留。自动识别检查前五条非空记录：首条为已知 Mova 类型，或至少两条符合标记/类型/名称布局；单条自定义类型需手选格式。类型别名只用于识别，原值不改写。这里遵循源表审阅语义，不复用 Mova 导出时的转置、类型转换或停用行过滤；空名称记录沿用空 ID 的内容匹配规则，类型与标记变化是单元格变化。`test/core.test.js`、`test/xlsx.test.js`、扩展及 UI 测试覆盖这些行为。
 
-XLSX 先流式检查 ZIP 解压大小和 XML 坐标，再加载工作簿；不执行公式或外部引用。XML 预检查按 BOM 识别 UTF-16 LE/BE，兼容 Excel 的 `customXml` 附加部件；仍拒绝 DTD、非法编码和损坏的 XML。只向 Webview 发送当前工作表的完整结果和其他表的统计。工作表按名称匹配，格式和主键配置只存在当前面板中。HEAD 使用内置 Git API 获取对象和 Git 可执行文件路径，再通过 `cat-file blob` 读取原字节，绕过 `show`/`buffer` 的 `--textconv`。CSV 和 XLSX 的标准差异均通过 `TabInputTextDiff` 自动接管；XLSX 即使原生编辑器显示二进制警告，也可以从标签取得两侧 URI，固定原标签以保留 `--wait`。
+XLSX 先流式检查 ZIP 解压大小和 XML 坐标，再加载工作簿；不执行公式或外部引用。XML 预检查按 BOM 识别 UTF-16 LE/BE，兼容 Excel 的 `customXml` 附加部件；仍拒绝 DTD、非法编码和损坏的 XML。只向 Webview 发送当前表的完整结果及其他已加载表的摘要。all/named 按表名配对，仅 first 按位置配对；格式和主键配置只存在当前面板中。HEAD 使用内置 Git API 获取对象和 Git 可执行文件路径，再通过 `cat-file blob` 读取原字节，绕过 `show`/`buffer` 的 `--textconv`。CSV 和 XLSX 的标准差异均通过 `TabInputTextDiff` 自动接管；XLSX 即使原生编辑器显示二进制警告，也可以从标签取得两侧 URI，固定原标签以保留 `--wait`。
 
 运行时依赖检查使用 `npm audit --omit=dev`。2026-10-27 扫描报告 ExcelJS → uuid 的中危传递告警（GHSA-w5hq-g745-h8pq，v3/v5/v6 的外部缓冲区边界）；ExcelJS 仅调用无参数 `v4()`，该调用不在公告触发范围内。暂不跨主版本覆盖传递依赖；升级 ExcelJS 后重新扫描。
 
@@ -136,3 +161,19 @@ npm run release -- --publish openvsx --package dist/release-xxxx/gridiff-0.1.14.
 保留配套的 `.vsix.json` 文件。此入口只接收本脚本准备的包；不能把任意 VSIX 改名后上传。脚本不忽略重复版本错误，也不会删除或回滚已上传的版本。
 
 上传命令成功不等于上架完成。Open VSX 可能返回 warning 但退出码为 0；仍需检查两个市场的公开版本和下载状态。说明见 [Open VSX CLI](https://github.com/eclipse-openvsx/openvsx/tree/master/cli) 和[命名空间规则](https://github.com/EclipseFdn/open-vsx.org/wiki/Publishing-Extensions)。
+
+### XLSX 可配置读取范围
+
+`sheetSelection` 是读取参数 `{mode: 'all' | 'first' | 'named', names?: string[]}`，与表头、主键和分页选项分离。插件默认 all，通过 `gridiff.xlsxSheets` / `gridiff.xlsxSheetNames` 配置，每次重新读取按原比较右侧 URI 的配置重新取值。插件继续使用自身 JS 读取和 diff，无 Go 可执行程序或本地 HTTP 依赖。
+
+独立程序默认 first；`--sheets first|all` 或可重复 `--sheet 名称` 贯穿前台 --wait、后台 launchRequest 和私有 submit 请求，并随每代 snapshot 发给 Worker。范围不参与服务发现键，同一服务可连续接收不同范围。页面从快照取得范围，不能被 sessionStorage 中保存的逐表设置覆盖；扩大范围需要重新提交文件。
+
+浏览器版由 `cli/xlsx_sheets.go`、插件由 `src/xlsx-sheets.js` 在 first/named 模式解析 workbook.xml 的工作表顺序、名称及 workbook.xml.rels 对应关系，确定保留路径。包含隐藏表，不根据文件编号或 activeTab 选择。未选工作表及其关系部件在解压前丢弃，不校验被剔除内容或 CRC；ZIP 目录路径、重复成员、加密、总声明体积和数量限制仍覆盖整包。共享字符串、样式和日期设置保留。all 模式沿用全量 ZIP/XML 校验；不能跳过未经解析的元数据。所选工作表关系损坏时直接报错。
+
+保留部件使用原压缩数据复制；Go 可沿用首表优化中的公式文本压缩。Node 使用 JSZip 复制保留的 DEFLATE 数据，ExcelJS 仅读取实际保留的表；源文件及共享字符串索引不变，内部快照不用于导出。`src/xlsx-core.js` 规范化全部保留工作表，不再次截取首表。两侧按名称模式读取完成后检查指定名称的并集：单侧缺失是增删，双侧缺失是错误。只有显式 first 模式允许两侧不同表名按位置配对。
+
+`test/sheets.test.js`、扩展测试及 Go archive/reuse 测试覆盖选择、缺失和校验边界；`test/sheet-selection.cjs` 使用实际可执行程序验证 CLI、同页范围切换、逐表设置、交换/恢复和未选表过滤。原始 XLSX 直接送 Worker 的一致性测试使用 all；first/named 由真实 Go 测试验证预先裁剪，避免用解析后裁剪冒充性能优化。
+
+### 两种运行模式的边界
+
+插件维持独立 JS 解析、比较与 Webview 展示，可独立打包发布。独立程序的后续目标是 Go 完成解析、比较、搜索和分页，浏览器只展示结果；本轮尚未进行这次计算迁移，仍使用 Go 预处理加 Worker 计算。两条链路可共用显示协议和测试样例，不能让插件依赖本地原生服务。

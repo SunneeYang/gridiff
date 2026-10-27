@@ -1,7 +1,7 @@
 {
   "name": "gridiff",
   "displayName": "Gridiff — Visual Table Diff",
-  "description": "看清每一个单元格的变化。按主键和字段对齐 CSV、XLSX，支持工作表切换及 Mova 多行表头。",
+  "description": "看清每一个单元格的变化。按主键和字段对齐 CSV、XLSX，可配置工作表读取范围，支持 Mova 多行表头。",
   "version": "0.1.14",
   "publisher": "sunneeyang",
   "repository": {
@@ -135,6 +135,25 @@
           "default": 0,
           "minimum": 0,
           "description": "custom 格式的中文说明所在记录，0 表示无。"
+        },
+        "gridiff.xlsxSheets": {
+          "type": "string",
+          "enum": [
+            "all",
+            "first",
+            "named"
+          ],
+          "default": "all",
+          "description": "XLSX 读取范围：all 读取全部工作表；first 仅读取首表并按位置配对；named 按 xlsxSheetNames 读取指定工作表。修改后重新读取或重新打开比较。"
+        },
+        "gridiff.xlsxSheetNames": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": [],
+          "description": "xlsxSheets 为 named 时使用的工作表名称列表，区分大小写并精确匹配；支持多张表。仅缺少一侧时显示新增/删除，两侧都找不到时报错。"
         }
       }
     }
@@ -142,7 +161,7 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "test:ui": "node test/ui.cjs",
-    "check": "node --check src/extension.js && node --check src/csv.js && node --check src/diff.js && node --check src/webview.js && node --check media/main.js && node --check scripts/release.js && node --check src/xlsx.js && node --check src/git.js && node --check src/comparison.js && node --check src/page.js && node --check media/browser.js && node --check scripts/build-cli.js && node --check src/xlsx-core.js && node --check media/themes.js && node --check media/worker-entry.js && node --check scripts/sync-project.js",
+    "check": "node --check src/extension.js && node --check src/csv.js && node --check src/diff.js && node --check src/webview.js && node --check media/main.js && node --check scripts/release.js && node --check src/xlsx.js && node --check src/git.js && node --check src/comparison.js && node --check src/page.js && node --check media/browser.js && node --check scripts/build-cli.js && node --check src/xlsx-core.js && node --check src/xlsx-sheets.js && node --check media/themes.js && node --check media/worker-entry.js && node --check scripts/sync-project.js && node --check scripts/benchmark.cjs && node --check media/view.js && node --check src/sheets.js",
     "package": "vsce package -o dist/",
     "release": "node scripts/release.js",
     "build:cli": "bun scripts/build-cli.js",
@@ -151,7 +170,11 @@
     "test:themes": "node test/themes.cjs",
     "test:worker": "node test/browser-compute.cjs",
     "test:go": "cd cli && go test ./...",
-    "sync:project": "node scripts/sync-project.js"
+    "sync:project": "node scripts/sync-project.js",
+    "benchmark": "node scripts/benchmark.cjs",
+    "test:reuse": "node test/browser-reuse.cjs",
+    "test:xlsx-snapshot": "node test/xlsx-snapshot.cjs",
+    "test:sheets": "node test/sheet-selection.cjs"
   },
   "devDependencies": {
     "@vscode/vsce": "^3.6.0",
@@ -162,6 +185,7 @@
     "exceljs": "4.4.0",
     "saxes": "6.0.0",
     "ssf": "0.11.2",
-    "yauzl": "3.4.0"
+    "yauzl": "3.4.0",
+    "jszip": "3.10.2"
   }
 }

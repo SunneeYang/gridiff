@@ -4,7 +4,6 @@ const MAX_CELLS = 1000000;
 
 function cellValue(cell, date1904) {
   const SSF = require('ssf');
-  const formula = cell.type === 6 ? cell.formula : undefined;
   let value = cell.type === 6 ? cell.result : cell.value;
   if (value?.richText) value = value.richText.map(part => part.text).join('');
   else if (value?.hyperlink) value = value.text;
@@ -26,15 +25,18 @@ function cellValue(cell, date1904) {
     catch { /* An unsupported display format must not hide the underlying value. */ }
     if (text === '') text = String(raw);
   }
-  if (formula !== undefined && (raw === null || text === '')) text = `=${formula}`;
-  return { text, meta: { type, raw, ...(formula !== undefined ? { formula } : {}) } };
+  return { text, meta: { type, raw } };
 }
 
-async function readWorkbookData(Workbook, input) {
+async function readWorkbookData(Workbook, input, onMetric) {
   const book = new Workbook();
+  let start = onMetric ? performance.now() : 0;
   await book.xlsx.load(input, { ignoreNodes: ['mergeCells', 'dataValidations', 'conditionalFormatting', 'drawing', 'picture', 'extLst'] });
+  onMetric?.({ phase: 'xlsx.load', ms: performance.now() - start, bytes: input.byteLength });
+  start = onMetric ? performance.now() : 0;
   let area = 0;
-  return book.worksheets.map(sheet => {
+  // Both hosts strip unselected sheet ZIP members before loading.
+  const sheets = book.worksheets.map(sheet => {
     const values = [], metadata = [];
     let height = 0, width = 0;
     sheet.eachRow(row => row.eachCell(cell => {
@@ -56,6 +58,8 @@ async function readWorkbookData(Workbook, input) {
     }
     return { name: sheet.name, values, metadata };
   });
+  onMetric?.({ phase: 'xlsx.normalize', ms: performance.now() - start, cells: area, sheets: sheets.length });
+  return sheets;
 }
 
 module.exports = { readWorkbookData };

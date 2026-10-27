@@ -5,7 +5,7 @@
   const saved = host.getState() || {};
   const state = { view: saved.view || 'grid', onlyChanges: saved.onlyChanges !== false, onlyFields: saved.onlyFields !== false,
     query: saved.query || '', page: 0 };
-  let data = null, model = null, revision = -1;
+  let data = null, model = null, revision = -1, pageCount = 1;
   const statusNames = { added: '+ 新增', removed: '− 删除', modified: '~ 修改', unchanged: '未变化' };
   const formatNames = { auto: '自动', csv: '一行表头', mova: 'Mova 四行表头', 'mova-vertical': 'Mova 竖表', headerless: '无表头', custom: '自定义表头' };
   const typeNames = { empty: '空值', string: '文本', number: '数字', boolean: '布尔值', date: '日期', error: '错误' };
@@ -52,8 +52,6 @@
       const value = marked(cell[side], cell[other]); line.append(value);
       const meta = cell[`${side}Meta`], otherMeta = cell[`${other}Meta`];
       if (meta) {
-        if (meta.formula !== undefined) value.append(element('code', cell[side] === `=${meta.formula}`
-          ? (meta.raw === null ? '（无缓存结果）' : '（结果为空文本）') : `=${meta.formula}`, 'formula'));
         const differentRaw = meta.raw !== null && String(meta.raw) !== cell[side];
         if ((otherMeta && meta.type !== otherMeta.type) || (cell.changed && cell.before === cell.after && meta.raw !== otherMeta?.raw) || differentRaw) {
           const raw = differentRaw ? ` · ${String(meta.raw)}` : '';
@@ -109,37 +107,22 @@
     }
   }
   function render() {
+    const perf = window.gridiffPerf, start = perf ? performance.now() : 0;
     persist();
     $('grid-tab').setAttribute('aria-pressed', String(state.view === 'grid'));
     $('list-tab').setAttribute('aria-pressed', String(state.view === 'list'));
     $('only-changes').checked = state.onlyChanges; $('only-fields').checked = state.onlyFields;
     const container = $('content'); container.replaceChildren(); container.tabIndex = state.view === 'list' ? 0 : -1;
     if (!model) { $('status').textContent = '只读比较'; $('page').textContent = ''; $('prev').disabled = $('next').disabled = true; return; }
-    const query = state.query.toLocaleLowerCase();
-    const filtered = model.rows.filter(row =>
-      (!state.onlyChanges || row.status !== 'unchanged' || row.moved || hasSchemaCells(row)) &&
-      (!query || row.identity.toLocaleLowerCase().includes(query) || row.cells.some(c => [c.before, c.after, c.beforeMeta?.formula, c.afterMeta?.formula, c.beforeMeta?.raw, c.afterMeta?.raw].some(v => v != null && String(v).toLocaleLowerCase().includes(query)))));
-    // Select columns from the whole comparison so search and pagination keep the same header.
-    const changedFields = new Set();
-    for (const row of model.rows) {
-      if (row.status === 'removed') continue;
-      row.cells.forEach((cell, i) => {
-        if (row.status === 'added' ? cell.after !== null && cell.after !== '' : cell.changed) changedFields.add(i);
-      });
-    }
-    if (model.counts.removed && !model.counts.added && !changedFields.size) {
-      for (const row of model.rows) if (row.status === 'removed') {
-        row.cells.forEach((cell, i) => { if (cell.before !== null && cell.before !== '') changedFields.add(i); });
-      }
-    }
-    const fieldIndexes = model.fields.map((_, i) => i).filter(i => !state.onlyFields || changedFields.has(i));
-    // Keep the DOM bounded for wide CSVs as well as long ones.
-    const pageSize = Math.max(1, Math.min(100, Math.floor(3000 / Math.max(1, fieldIndexes.length))));
-    const pages = Math.max(1, Math.ceil(filtered.length / pageSize)); state.page = Math.min(state.page, pages - 1);
-    const visible = filtered.slice(state.page * pageSize, (state.page + 1) * pageSize);
+    const filterStart = perf ? performance.now() : 0;
+    const selected = data.pageInfo ? { rows: model.rows, pageInfo: data.pageInfo } : window.gridiffView(model, state);
+    const { page, pages, fieldIndexes, totalRows, filteredRows } = selected.pageInfo;
+    pageCount = pages;
+    const visible = selected.rows; state.page = page;
+    const filteredAt = perf ? performance.now() : 0, columnsAt = filteredAt;
     $('page').textContent = `${state.page + 1} / ${pages}`; $('prev').disabled = !state.page; $('next').disabled = state.page + 1 >= pages;
-    $('status').textContent = `只读 · ${model.alignment === 'position' ? '按行号对齐' : `按 ${model.keys.join(' + ')} 对齐`} · ${filtered.length} / ${model.rows.length} 条记录 · 本页 ${visible.length} 条`;
-    if (!filtered.length) container.append(element('div', query ? '没有匹配的记录。' : '没有变动记录。可取消“仅看变动记录”查看原表；字段变化见上方。', 'empty-state'));
+    $('status').textContent = `只读 · ${model.alignment === 'position' ? '按行号对齐' : `按 ${model.keys.join(' + ')} 对齐`} · ${filteredRows} / ${totalRows} 条记录 · 本页 ${visible.length} 条`;
+    if (!filteredRows) container.append(element('div', state.query ? '没有匹配的记录。' : '没有变动记录。可取消“仅看变动记录”查看原表；字段变化见上方。', 'empty-state'));
     if (visible.length && state.view === 'grid') {
       const wrap = element('div', undefined, 'grid-wrap'); wrap.tabIndex = 0; wrap.setAttribute('aria-label', '可横向滚动的差异表格');
       const table = element('table'); const thead = element('thead'), tr = element('tr');
@@ -171,20 +154,37 @@
         article.append(values); container.append(article);
       }
     }
+    if (perf) {
+      const done = performance.now(), counts = { revision, busy: !!data.busy, rows: totalRows, columns: fieldIndexes.length, visibleRows: visible.length, request: data.presentation, generation: data.generation };
+      perf.add('render.setup', filterStart - start, counts);
+      perf.add('render.filter', filteredAt - filterStart, counts);
+      perf.add('render.columns', columnsAt - filteredAt, counts);
+      perf.add('render.dom', done - columnsAt, counts);
+      perf.add('render.total', done - start, counts);
+      requestAnimationFrame(() => requestAnimationFrame(() => perf.add('render.frame', performance.now() - start, counts)));
+    }
   }
   document.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', () => host.postMessage({ action: button.dataset.action })));
-  $('grid-tab').addEventListener('click', () => { state.view = 'grid'; render(); });
-  $('list-tab').addEventListener('click', () => { state.view = 'list'; render(); });
-  $('only-changes').addEventListener('change', e => { state.onlyChanges = e.target.checked; state.page = 0; render(); });
-  $('only-fields').addEventListener('change', e => { state.onlyFields = e.target.checked; render(); });
+  function requestRender() {
+    persist();
+    if (window.gridiffHost) host.postMessage({ action: 'view', view: { ...state } });
+    else render();
+  }
+  $('grid-tab').addEventListener('click', () => { state.view = 'grid'; requestRender(); });
+  $('list-tab').addEventListener('click', () => { state.view = 'list'; requestRender(); });
+  $('only-changes').addEventListener('change', e => { state.onlyChanges = e.target.checked; state.page = 0; requestRender(); });
+  $('only-fields').addEventListener('change', e => { state.onlyFields = e.target.checked; requestRender(); });
   $('search').value = state.query;
   let searchTimer;
-  $('search').addEventListener('input', e => { state.query = e.target.value; state.page = 0; clearTimeout(searchTimer); searchTimer = setTimeout(render, 150); });
-  $('prev').addEventListener('click', () => { state.page--; render(); });
-  $('next').addEventListener('click', () => { state.page++; render(); });
+  $('search').addEventListener('input', e => { state.query = e.target.value; state.page = 0; if (window.gridiffHost) host.postMessage({ action: 'view-pending', view: { ...state } }); clearTimeout(searchTimer); searchTimer = setTimeout(requestRender, 150); });
+  $('prev').addEventListener('click', () => { state.page = Math.max(0, state.page - 1); requestRender(); });
+  $('next').addEventListener('click', () => { state.page = Math.min(pageCount - 1, state.page + 1); requestRender(); });
   $('sheet').addEventListener('change', event => host.postMessage({ action: 'sheet', name: event.target.value }));
   window.addEventListener('message', event => {
     if (window.gridiffHost && event.source !== null) return;
+    if (event.data?.type === 'snapshot-replacing') {
+      clearTimeout(searchTimer); state.query = ''; state.page = 0; $('search').value = ''; persist(); return;
+    }
     if (event.data?.type === 'session-ended') {
       data = model = null; state.query = ''; clearTimeout(searchTimer);
       $('title').textContent = '比较已结束'; $('sources').textContent = ''; $('sources').title = '';
@@ -196,13 +196,16 @@
       return;
     }
     if (event.data?.type !== 'comparison') return;
+    const changed = !data || revision !== event.data.revision || data.presentation !== event.data.presentation;
     data = event.data; model = data.result;
-    if (revision !== data.revision) { state.page = 0; revision = data.revision; }
+    if (revision !== data.revision) { if (!data.pageInfo) state.page = 0; revision = data.revision; }
+    if (changed && !data.busy && data.viewState) { Object.assign(state, data.viewState); $('search').value = state.query; }
     $('title').textContent = data.title;
     $('sources').textContent = `旧 ${data.sources[0]} → 新 ${data.sources[1]}`; $('sources').title = $('sources').textContent;
     $('format').textContent = `格式：${formatNames[data.options.format]}${model && data.options.format === 'auto' ? ` (${model.formats.map(f => formatNames[f]).join(' / ')})` : ''}`;
     $('keys').textContent = data.options.alignment === 'position' ? '对齐：行号' : `主键：${model?.keys.join(' + ') || data.options.keyColumns?.join(' + ') || '自动'}`;
-    document.querySelectorAll('[data-action]').forEach(button => { button.disabled = data.busy; });
+    document.querySelectorAll('[data-action]').forEach(button => { button.disabled = data.busy || (data.unsupported && button.dataset.action !== 'close'); });
+    $('prev').disabled = data.busy || !state.page; $('next').disabled = data.busy || state.page + 1 >= pageCount;
     document.querySelector('[data-action="native"]').hidden = !!data.xlsx || !!data.readonlySnapshot;
     $('sheet-label').hidden = !data.xlsx;
     $('sheet').replaceChildren(); $('sheet').disabled = data.busy;
@@ -212,16 +215,19 @@
       const option = element('option', `${sheet.name}${status}${sheet.error ? ' · 需调整设置' : counts}`);
       option.value = sheet.name; option.selected = sheet.name === data.sheetName; $('sheet').append(option);
     }
-    $('error').hidden = !data.error; $('error').textContent = data.error ? `${data.error} ${data.xlsx ? '可调整当前工作表的表头、主键，或检查源文件。' : data.readonlySnapshot ? '可调整格式、主键，或检查源文件。' : '可调整格式、主键，或打开文本对比。'}` : '';
+    $('error').hidden = !data.error; $('error').textContent = data.error ? data.unsupported ? data.error : `${data.error} ${data.xlsx ? '可调整当前工作表的表头、主键，或检查源文件。' : data.readonlySnapshot ? '可调整格式、主键，或检查源文件。' : '可调整格式、主键，或打开文本对比。'}` : '';
     const notices = [];
     if (data.busy) notices.push('正在读取并计算差异…');
     if (model?.alignment === 'position') notices.push('按行号对齐：插入或删除记录可能使后续记录错位。');
     if (data.skipped?.some(Boolean)) notices.push(`已忽略全空分隔记录：旧 ${data.skipped[0]} / 新 ${data.skipped[1]} 条。`);
     if (model?.unkeyed?.before || model?.unkeyed?.after) notices.push(`Mova 无主键行：旧 ${model.unkeyed.before} / 新 ${model.unkeyed.after} 条；按完整内容匹配并保留重复次数，未匹配的分别显示新增/删除，不推断顺序。`);
-    if (data.xlsx) notices.push('XLSX 比较已保存的数据和公式；公式结果来自文件缓存，不重新计算。忽略字体、颜色、图表等样式变化。');
-    notices.push(data.readonlySnapshot ? '当前显示内存中的只读快照；文件修改后请从 Fork 重新打开比较。' : '当前显示读取时的快照；文件修改后请重新读取。');
+    if (data.xlsx) {
+      const range = data.sheetSelection?.mode === 'first' ? '首个工作表' : data.sheetSelection?.mode === 'named' ? '指定工作表：' + data.sheetSelection.names.join('、') : '全部工作表';
+      notices.push(`XLSX 读取范围：${range}。只比较已保存的单元格结果，不比较公式；缺少缓存结果时按空值处理，不重新计算。忽略字体、颜色、图表等样式变化。`);
+    }
+    if (!data.unsupported) notices.push(data.readonlySnapshot ? '当前显示内存中的只读快照；文件修改后请从 Fork 重新打开比较。' : '当前显示读取时的快照；文件修改后请重新读取。');
     $('notice').textContent = notices.join(' ');
-    renderSummary(); renderSchema(); render();
+    if (changed) { renderSummary(); renderSchema(); render(); }
   });
-  host.postMessage({ action: 'ready' });
+  host.postMessage({ action: 'ready', view: { ...state } });
 })();

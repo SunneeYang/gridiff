@@ -21,7 +21,7 @@ ${browser ? '<section class="theme-controls" aria-label="外观设置"><label>�
 <section id="summary" aria-label="变化统计"></section><details id="schema" hidden><summary id="schema-title"></summary><div id="schema-content" tabindex="0" role="region" aria-label="字段变化列表"></div></details>
 <section id="content" aria-label="差异内容"></section>
 <footer><span id="status"></span><nav aria-label="记录分页"><button id="prev">← 上一页</button><span id="page"></span><button id="next">下一页 →</button></nav></footer>
-</main>${(browser ? ['browser.js', 'main.js'] : ['main.js']).map(name => `<script${nonce ? ` nonce="${escape(nonce)}"` : ''} src="${escape(resource(name))}"></script>`).join('')}</body></html>`;
+</main>${(browser ? ['browser.js', 'view.js', 'main.js'] : ['view.js', 'main.js']).map(name => `<script${nonce ? ` nonce="${escape(nonce)}"` : ''} src="${escape(resource(name))}"></script>`).join('')}</body></html>`;
 }
 
 module.exports = { pageHTML };

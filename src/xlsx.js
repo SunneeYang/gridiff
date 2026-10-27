@@ -1,25 +1,52 @@
 'use strict';
 const { readTableRows } = require('./csv');
 const { readWorkbookData } = require('./xlsx-core');
+const { worksheetPaths, unusedWorksheet } = require('./xlsx-sheets');
+const { sheetSelection } = require('./sheets');
 
 const MAX_BYTES = 8 * 1024 * 1024;
-const MAX_EXPANDED_BYTES = 64 * 1024 * 1024;
+const MAX_EXPANDED_BYTES = 128 * 1024 * 1024;
 const MAX_CELLS = 1000000;
 
 // Validate the expanded archive before the workbook library allocates its model.
-async function validateArchive(buffer) {
-  const zip = await require('yauzl').fromBufferPromise(buffer);
+async function validateArchive(buffer, selection) {
+  const zip = await require('yauzl').fromBufferPromise(buffer, { autoClose: false, strictFileNames: true });
   const { SaxesParser } = require('saxes');
   let bytes = 0, declaredBytes = 0, entries = 0, cells = 0, rows = 0;
   const names = new Set();
+  const parts = new Map();
   try {
     for await (const entry of zip.eachEntry()) {
       if (++entries > 10000) throw new Error('XLSX 压缩包文件数量超过 10000。');
       if (names.has(entry.fileName)) throw new Error('XLSX 压缩包包含重复文件。');
       names.add(entry.fileName);
       declaredBytes += entry.uncompressedSize;
-      if (declaredBytes > MAX_EXPANDED_BYTES) throw new Error('XLSX 解压后超过 64 MiB，请缩小工作簿。');
+      if (declaredBytes > MAX_EXPANDED_BYTES) throw new Error('XLSX 解压后超过 128 MiB，请缩小工作簿。');
       if (entry.isEncrypted()) throw new Error('暂不支持加密的 XLSX。');
+      const clean = require('node:path').posix.normalize(entry.fileName);
+      if (clean !== entry.fileName) throw new Error('XLSX 压缩包路径无效。');
+      parts.set(entry.fileName, entry);
+    }
+    if (!names.has('xl/workbook.xml')) throw new Error('文件不是有效的 XLSX 工作簿。');
+    const metadata = new Set();
+    const selected = await worksheetPaths(parts, async name => {
+      const chunks = [];
+      const stream = await zip.openReadStreamPromise(parts.get(name));
+      for await (const chunk of stream) {
+        bytes += chunk.length;
+        if (bytes > MAX_EXPANDED_BYTES) throw new Error('XLSX 解压后超过 128 MiB，请缩小工作簿。');
+        chunks.push(chunk);
+      }
+      metadata.add(name);
+      return Buffer.concat(chunks);
+    }, selection);
+    const removed = [];
+    for (const entry of parts.values()) {
+      if (unusedWorksheet(entry.fileName, selected)) {
+        removed.push(entry.fileName);
+        continue;
+      }
+      if (metadata.has(entry.fileName)) continue;
       const xml = /\.(xml|rels)$/i.test(entry.fileName) ? new SaxesParser() : null;
       let decoder, prefix = Buffer.alloc(0);
       if (xml) {
@@ -42,7 +69,7 @@ async function validateArchive(buffer) {
       const stream = await zip.openReadStreamPromise(entry);
       for await (let chunk of stream) {
         bytes += chunk.length;
-        if (bytes > MAX_EXPANDED_BYTES) throw new Error('XLSX 解压后超过 64 MiB，请缩小工作簿。');
+        if (bytes > MAX_EXPANDED_BYTES) throw new Error('XLSX 解压后超过 128 MiB，请缩小工作簿。');
         if (!xml) continue;
         if (!decoder) {
           chunk = Buffer.concat([prefix, chunk]);
@@ -56,18 +83,22 @@ async function validateArchive(buffer) {
       }
       xml?.write(decoder ? decoder.decode() : new TextDecoder('utf-8', { fatal: true }).decode(prefix)).close();
     }
-    if (!names.has('xl/workbook.xml')) throw new Error('文件不是有效的 XLSX 工作簿。');
+    // JSZip copies unchanged DEFLATE members without inflating/recompressing them.
+    if (!removed.length) return buffer;
+    const packed = await require('jszip').loadAsync(buffer);
+    for (const name of removed) packed.remove(name);
+    return await packed.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
   } finally { zip.close(); }
 }
 
-async function readWorkbook(input) {
+async function readWorkbook(input, selection) {
   const buffer = Buffer.from(input);
   if (buffer.length > MAX_BYTES) throw new Error('单侧文件超过 8 MiB，请缩小工作簿。');
   try {
-    await validateArchive(buffer);
+    const prepared = await validateArchive(buffer, sheetSelection(selection));
     // Use the pinned Workbook implementation without bundling unused streaming readers/writers.
     const Workbook = require('exceljs/lib/doc/workbook');
-    return await readWorkbookData(Workbook, buffer);
+    return await readWorkbookData(Workbook, prepared);
   } catch (error) { throw new Error(`无法读取 XLSX：${error.message}`); }
 }
 
