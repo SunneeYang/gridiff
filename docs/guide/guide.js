@@ -1,6 +1,7 @@
 'use strict';
 
 (() => {
+  const resourceBase = new URL('.', document.currentScript.src);
   const systems = { macos: 'macOS', windows: 'Windows', linux: 'Linux' };
   const tools = { native: '策划库自带 Gridiff', vscode: 'VS Code 扩展', cursor: 'Cursor 扩展' };
   const titles = ['准备与安装', '配置 Fork', '打开第一次对比', '读懂变化与快捷键', '遇到问题'];
@@ -12,7 +13,10 @@
   const key = value => `<kbd>${escape(value)}</kbd>`;
   const link = (url, label) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${label} ↗</a>`;
   const notice = (text, type = '') => `<p class="notice ${type}">${text}</p>`;
-  const image = (name, alt, caption) => `<figure><a href="assets/${name}" target="_blank" rel="noopener noreferrer" aria-label="放大图片：${alt}"><img src="assets/${name}" alt="${alt}" loading="lazy"></a><figcaption>${caption} · 点击图片可在新标签页放大。</figcaption></figure>`;
+  const image = (name, alt, caption) => {
+    const url = escape(new URL(`assets/${name}`, resourceBase).href);
+    return `<figure><a href="${url}" target="_blank" rel="noopener noreferrer" aria-label="放大图片：${alt}"><img src="${url}" alt="${alt}" loading="lazy"></a><figcaption>${caption} · 点击图片可在新标签页放大。</figcaption></figure>`;
+  };
   const copyBlock = (id, label, value, helper = '') => `<div class="copy-block"><label class="copy-title" for="${id}">${label}</label><div class="copy-row"><textarea id="${id}" rows="${value.length > 90 ? 3 : value.length > 60 ? 2 : 1}" readonly spellcheck="false">${escape(value)}</textarea><button type="button" data-copy="${id}">复制</button></div><p class="copy-status" id="${id}-status" role="status">${helper}</p></div>`;
 
   function detectedSystem() {
@@ -27,9 +31,9 @@
   function inferredRoot() {
     if (location.protocol !== 'file:') return '';
     let pathname;
-    try { pathname = decodeURIComponent(location.pathname); } catch { return ''; }
-    if (!/\/gridiff\/guide\/index\.html$/.test(pathname)) return '';
-    const root = pathname.replace(/\/gridiff\/guide\/index\.html$/, '') || '/';
+    try { pathname = decodeURIComponent(resourceBase.pathname); } catch { return ''; }
+    if (!/\/gridiff\/guide\/$/.test(pathname)) return '';
+    const root = pathname.replace(/\/gridiff\/guide\/$/, '') || '/';
     return /^\/[a-z]:\//i.test(root) ? root.slice(1).replaceAll('/', '\\') : root;
   }
 

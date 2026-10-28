@@ -5,7 +5,7 @@ const { createHash, randomBytes } = require('node:crypto');
 const { parseArgs } = require('node:util');
 
 const targets = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'windows-x64'];
-const guideFiles = ['index.html', 'guide.css', 'guide.js', 'theme.js', 'tokens.css', 'assets/fork-custom-default.png', 'assets/gridiff-example.png'];
+const guideFiles = ['guide.css', 'guide.js', 'theme.js', 'tokens.css', 'assets/fork-custom-default.png', 'assets/gridiff-example.png'];
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const attributes = `/bin/**/gridiff filter=lfs diff=lfs merge=lfs -text
 /bin/**/gridiff.exe filter=lfs diff=lfs merge=lfs -text
@@ -14,7 +14,7 @@ const attributes = `/bin/**/gridiff filter=lfs diff=lfs merge=lfs -text
 /README.md text eol=lf
 /manifest.json text eol=lf
 /LICENSES.txt text eol=lf
-/guide/*.html text eol=lf
+/安装与使用.html text eol=lf
 /guide/*.css text eol=lf
 /guide/*.js text eol=lf
 `;
@@ -77,6 +77,7 @@ function prepare(root, project) {
   add('gridiff.cmd', readFile(path.join(root, 'launchers', 'gridiff.cmd')).toString('utf8').replace(/\r?\n/g, '\r\n'));
   add('LICENSES.txt', license);
   add('.gitattributes', attributes);
+  add('安装与使用.html', readFile(path.join(root, '安装与使用.html')).toString('utf8').replaceAll('docs/guide/', 'guide/'));
   for (const name of guideFiles) add(`guide/${name}`, readFile(path.join(root, 'docs', 'guide', name)));
   const sourceState = provenance.sourceDirty === true ? '含未提交修改的本地开发构建' : provenance.sourceDirty === false ? '源码工作区干净的构建；不代表已正式发布' : '来源工作区状态未知的构建';
   add('README.md', `# Gridiff 策划仓库入口
@@ -88,7 +89,7 @@ function prepare(root, project) {
 
 ## 图文安装与使用指南
 
-双击本目录的 [guide/index.html](guide/index.html)，按系统和工具查看分步说明，包含 VS Code、Cursor 和仓库自带 Gridiff 的安装、Fork 配置、快捷键及故障排查。指南默认跟随系统明暗，也可在页内切换浅色、深色和多套配色。指南可离线打开；安装编辑器扩展时需要联网。浏览器仅辅助识别系统，不能自动检查本机安装或修改 Fork 设置。
+双击本目录与 README 同级的 [安装与使用.html](安装与使用.html)，按系统和工具查看分步说明，包含 VS Code、Cursor 和仓库自带 Gridiff 的安装、Fork 配置、快捷键及故障排查。指南默认跟随系统明暗，也可在页内切换浅色、深色和多套配色。指南可离线打开；安装编辑器扩展时需要联网。浏览器仅辅助识别系统，不能自动检查本机安装或修改 Fork 设置。
 
 ## Fork 配置
 
@@ -132,10 +133,16 @@ Unix 入口自动选择 macOS/Linux 的 ARM64 或 x64 程序。Windows 目前提
     const current = hash(readFile(target));
     if (current !== hash(file.bytes) && current !== previous?.files?.[name]?.sha256) throw new Error(`目标文件有未登记或手工修改，未覆盖：${target}`);
   }
-  return { destination, files, manifest };
+  const obsolete = [];
+  const oldEntry = 'guide/index.html', oldPath = path.join(destination, oldEntry);
+  if (inspectPath(oldPath, 'file', true)) {
+    if (hash(readFile(oldPath)) !== previous?.files?.[oldEntry]?.sha256) throw new Error(`目标旧指南有未登记或手工修改，未删除：${oldPath}`);
+    obsolete.push(oldEntry);
+  }
+  return { destination, files, manifest, obsolete };
 }
 
-function applyFiles(destination, files) {
+function applyFiles(destination, files, obsolete) {
   for (const [name, file] of files) {
     const target = path.join(destination, name), directory = path.dirname(target);
     inspectPath(directory, 'directory', true);
@@ -148,6 +155,7 @@ function applyFiles(destination, files) {
       fs.renameSync(temporary, target);
     } finally { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); }
   }
+  for (const name of obsolete) fs.unlinkSync(path.join(destination, name));
 }
 
 function syncProject(args, { root = path.resolve(__dirname, '..'), log = console.log } = {}) {
@@ -159,9 +167,10 @@ function syncProject(args, { root = path.resolve(__dirname, '..'), log = console
   log(`${values.apply ? '同步' : '预览'} Gridiff ${result.manifest.version} → ${result.destination}`);
   log(`来源：${result.manifest.sourceCommit || '未知'}；未提交修改：${result.manifest.sourceDirty === null ? '未知' : result.manifest.sourceDirty}`);
   log(paths.join('\n'));
-  if (values.apply) { applyFiles(result.destination, result.files); log('同步完成；未提交或推送 Git。'); }
+  if (result.obsolete.length) log(`移除旧入口：${result.obsolete.join('、')}`);
+  if (values.apply) { applyFiles(result.destination, result.files, result.obsolete); log('同步完成；未提交或推送 Git。'); }
   else log('校验通过，尚未写入。追加 --apply 执行同步。');
-  return { destination: result.destination, applied: !!values.apply, manifest: result.manifest, paths };
+  return { destination: result.destination, applied: !!values.apply, manifest: result.manifest, paths, obsolete: result.obsolete };
 }
 
 if (require.main === module) {

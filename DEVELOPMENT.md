@@ -54,7 +54,7 @@ npm run build:cli -- --all
 
 运行 `npm run build:cli -- --all` 后，用 `npm run sync:project -- --project /path/to/design` 预览，再加 `--apply` 写入。脚本校验五个平台的版本、构建来源、大小、SHA-256 与许可证，并要求 Go 源码及内嵌资源的构建输入摘要一致，避免混入旧包。在 `design/gridiff/` 内生成统一入口、平台程序、使用说明和清单；目录内的 `.gitattributes` 将程序交给 Git LFS 管理。它保留不受管理的文件，遇到受管理文件被手工改动会停止，不执行 Git 暂存、提交或推送。
 
-`docs/guide/` 是可通过 `file://` 离线打开的静态图文指南，不需要构建或启动服务。`sync:project` 将清单中的 HTML、CSS、脚本和图片同步到 `design/gridiff/guide/`，缺少资源会在写入前报错；所有指南资源纳入目标清单的哈希校验。修改资源列表时同步更新脚本与同步测试。`docs/INSTALL.md` 提供 Markdown 入口与完整文字版。指南和设计辅助文件不随 VSIX 分发。
+根目录的 `安装与使用.html` 是可通过 `file://` 离线打开的静态图文指南，资源放在 `docs/guide/`，不需要构建或启动服务。`sync:project` 将 HTML 同步到 `design/gridiff/安装与使用.html`，与 README 同级；CSS、脚本和图片保留在 `design/gridiff/guide/`，缺少资源会在写入前报错。升级时只删除哈希与原清单一致的旧 `guide/index.html`，手工修改的旧入口会阻止同步。所有资源纳入目标清单的哈希校验；修改资源列表时同步更新脚本与测试。`docs/INSTALL.md` 提供 Markdown 入口与完整文字版。指南和设计辅助文件不随 VSIX 分发。
 
 macOS/Linux 的 `gridiff` 和 Windows 的 `gridiff.cmd` 根据系统与 CPU 转发参数。当前支持 macOS/Linux ARM64 和 x64，以及 Windows x64；缺少程序或只取得 LFS 指针时给出明确提示。Fork 选择统一入口，Arguments 设置为 `$REMOTE $LOCAL`。CLI 按 `<旧文件> <新文件>` 接受两个路径，同时兼容旧的 `diff` 前缀。成员更新 design 仓库及 LFS 对象即可使用。同步前后应检查 design 的 Git 状态；`manifest.json` 中的 `sourceDirty` 表示是否来自尚未提交的源码。
 

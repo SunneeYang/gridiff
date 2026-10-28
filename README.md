@@ -6,9 +6,9 @@
 
 ## 图文安装与使用指南
 
-第一次使用请看 [安装与使用](docs/INSTALL.md)。交互指南位于 `docs/guide/index.html`，下载完整目录后双击打开，可按 macOS / Windows / Linux 和 VS Code / Cursor / 仓库自带 Gridiff 选择步骤。它不依赖开发服务器或联网资源；安装扩展仍需要网络。在 GitHub 上直接点 HTML 只会显示源码。
+第一次使用可双击与本 README 同级的 [安装与使用.html](安装与使用.html)，也可阅读 [Markdown 安装说明](docs/INSTALL.md)。交互指南需与 `docs/guide/` 资源目录一起下载，可按 macOS / Windows / Linux 和 VS Code / Cursor / 仓库自带 Gridiff 选择步骤。它不依赖开发服务器或联网资源；安装扩展仍需要网络。在 GitHub 上直接点 HTML 只会显示源码。
 
-团队成员更新 design 仓库后，可直接打开 `gridiff/guide/index.html`。网页仅辅助识别系统，工具和本机路径由用户确认。
+团队成员更新 design 仓库后，可直接打开 `gridiff/安装与使用.html`。网页仅辅助识别系统，工具和本机路径由用户确认。
 
 ## 独立程序：在浏览器中比较
 

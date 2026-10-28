@@ -1,6 +1,6 @@
 # Gridiff 安装与使用
 
-建议第一次使用的同事打开图文指南：下载完整的 `docs/guide/` 目录后，双击其中的 **index.html**。团队的 design 仓库已同步指南时，直接打开 **gridiff/guide/index.html**。
+建议第一次使用的同事打开图文指南：下载源码根目录的 **安装与使用.html** 和 `docs/guide/` 资源目录后，双击 HTML。团队的 design 仓库已同步指南时，直接打开与 README 同级的 **gridiff/安装与使用.html**。
 
 指南按系统和工具显示步骤，可复制参数、查看配图、回看快捷键。离线即可阅读；安装编辑器扩展需要联网。GitHub 中直接点 HTML 会显示源码，不会运行交互页面。
 

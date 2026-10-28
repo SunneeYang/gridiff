@@ -18,12 +18,15 @@ function observeInitialTheme() {
 async function main() {
   assert.ok(process.env.CODEX_AGENT_TMP, 'Run through agent-tmp-run');
   const root = path.resolve(__dirname, '..');
-  const source = pathToFileURL(path.join(root, 'docs/guide/index.html')).href;
-  const head = (await fs.readFile(path.join(root, 'docs/guide/index.html'), 'utf8')).split('</head>')[0];
-  const themeTag = head.match(/<script\b[^>]*\bsrc=["']theme\.js["'][^>]*>/);
+  const entry = path.join(root, '安装与使用.html');
+  const source = pathToFileURL(entry).href;
+  const html = await fs.readFile(entry, 'utf8');
+  const head = html.split('</head>')[0];
+  const themeTag = head.match(/<script\b[^>]*\bsrc=["']docs\/guide\/theme\.js["'][^>]*>/);
   assert.ok(themeTag, 'the initial theme script must be in the document head');
   assert.doesNotMatch(themeTag[0], /\b(?:async|defer|type\s*=\s*["']module["'])\b/, 'initial theme must run synchronously');
   assert.ok(head.indexOf(themeTag[0]) < head.search(/<link\b[^>]*\brel=["']stylesheet["']/), 'initial theme must be applied before loading CSS');
+  assert.match(head, /href=["']docs\/guide\/guide\.css["']/);
   const browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'chrome' });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const errors = [], externalRequests = [];
@@ -101,6 +104,8 @@ async function main() {
     await themeCheck(page, 'light', 'cobalt');
     await page.locator('#theme-mode').selectOption('system');
     await themeCheck(page, 'dark', 'cobalt');
+    await open('macos', 'native', '2');
+    assert.equal(await page.locator('#project-root').inputValue(), '', 'source checkout must not be mistaken for a deployed design repository');
     await open('macos', 'native', '4');
     for (const palette of ['cobalt', 'nord', 'solarized']) {
       await page.locator('#theme-palette').selectOption(palette);
@@ -216,11 +221,22 @@ async function main() {
     await page.locator('.skip-link').focus(); await page.keyboard.press('Enter');
     assert.equal(page.url(), previousURL, 'skip link must preserve the selected guide route');
     assert.equal(await page.evaluate(() => document.activeElement.id), 'content');
-    const copy = path.join(process.env.CODEX_AGENT_TMP, 'design with spaces', 'gridiff', 'guide');
-    await fs.cp(path.join(root, 'docs/guide'), copy, { recursive: true });
-    await page.goto(pathToFileURL(path.join(copy, 'index.html')).href + '#os=macos&tool=native&step=2');
-    assert.equal(await page.locator('#project-root').inputValue(), path.dirname(path.dirname(copy)));
-    assert.equal(await page.locator('#file-path').inputValue(), path.join(path.dirname(copy), 'gridiff'));
+    const copy = path.join(process.env.CODEX_AGENT_TMP, 'design with spaces', 'gridiff');
+    await fs.cp(path.join(root, 'docs/guide'), path.join(copy, 'guide'), { recursive: true });
+    const deployedEntry = path.join(copy, '安装与使用.html');
+    await fs.writeFile(deployedEntry, html.replaceAll('docs/guide/', 'guide/'));
+    await page.goto(pathToFileURL(deployedEntry).href + '#os=macos&tool=native&step=2');
+    assert.equal(await page.locator('#project-root').inputValue(), path.dirname(copy));
+    assert.equal(await page.locator('#file-path').inputValue(), path.join(copy, 'gridiff'));
+    await themeCheck(page, 'light', 'cobalt');
+    for (const step of ['2', '4']) {
+      await page.locator(`[data-step="${step}"]`).click();
+      assert.deepEqual(await page.locator('img').evaluateAll(async images => {
+        await Promise.all(images.map(image => image.decode().catch(() => {})));
+        return images.filter(image => !image.naturalWidth).map(image => image.src);
+      }), [], 'deployed entry must load pictures from its guide resource directory');
+      assert.deepEqual(await contrastCheck(), [], 'deployed entry must load its stylesheet');
+    }
     for (const [platform, expected] of [['Win32', 'windows'], ['Linux x86_64', 'linux'], ['Unknown', '']]) {
       const detection = await browser.newContext();
       try {

@@ -18,6 +18,7 @@ function fixture(t) {
   const root = path.join(directory, 'source'), project = path.join(directory, 'design with spaces');
   fs.mkdirSync(path.join(root, 'launchers'), { recursive: true }); fs.mkdirSync(project);
   fs.cpSync(path.join(__dirname, '..', 'docs', 'guide'), path.join(root, 'docs', 'guide'), { recursive: true });
+  fs.copyFileSync(path.join(__dirname, '..', '安装与使用.html'), path.join(root, '安装与使用.html'));
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'gridiff', publisher: 'sunneeyang', version: '0.1.14' }));
   for (const name of ['gridiff', 'gridiff.cmd']) fs.copyFileSync(path.join(__dirname, '..', 'launchers', name), path.join(root, 'launchers', name));
   for (const target of targets) {
@@ -75,8 +76,14 @@ test('sync installs all platform binaries, launchers and nested LFS rules; unkno
   assert.ok(readme.includes('Arguments 设置为 `$REMOTE $LOCAL`'));
   assert.ok(readme.includes('第一文件作为旧版本、第二文件作为新版本'));
   assert.ok(readme.includes('不根据路径或内容猜方向'));
-  assert.ok(readme.includes('guide/index.html'));
-  for (const name of ['index.html', 'guide.css', 'guide.js', 'theme.js', 'tokens.css', 'assets/fork-custom-default.png', 'assets/gridiff-example.png']) {
+  assert.ok(readme.includes('[安装与使用.html](安装与使用.html)'));
+  const entry = fs.readFileSync(path.join(destination, '安装与使用.html'), 'utf8');
+  assert.equal(hash(Buffer.from(entry)), result.manifest.files['安装与使用.html'].sha256);
+  assert.match(entry, /src="guide\/theme\.js"/);
+  assert.match(entry, /href="guide\/guide\.css"/);
+  assert.doesNotMatch(entry, /(?:src|href)="docs\/guide\//);
+  assert.equal(fs.existsSync(path.join(destination, 'guide', 'index.html')), false);
+  for (const name of ['guide.css', 'guide.js', 'theme.js', 'tokens.css', 'assets/fork-custom-default.png', 'assets/gridiff-example.png']) {
     assert.equal(hash(fs.readFileSync(path.join(destination, 'guide', name))), result.manifest.files[`guide/${name}`].sha256);
   }
   if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(destination, 'gridiff')).mode & 0o777, 0o755);
@@ -84,6 +91,44 @@ test('sync installs all platform binaries, launchers and nested LFS rules; unkno
   invoke(true);
   assert.equal(fs.readFileSync(path.join(destination, 'my-notes.txt'), 'utf8'), 'keep me');
   assert.equal(fs.readdirSync(destination).some(name => name.startsWith('.gridiff-sync-')), false);
+});
+
+test('moving the guide to the top level removes only the unchanged managed legacy entry', t => {
+  const { destination, invoke } = fixture(t);
+  const result = invoke(true);
+  const oldEntry = path.join(destination, 'guide', 'index.html');
+  const original = Buffer.from('<!doctype html><title>Original managed guide</title>');
+  fs.writeFileSync(oldEntry, original);
+  const oldManifest = result.manifest;
+  oldManifest.files['guide/index.html'] = { sha256: hash(original), mode: 0o644 };
+  delete oldManifest.files['安装与使用.html'];
+  fs.writeFileSync(path.join(destination, 'manifest.json'), JSON.stringify(oldManifest));
+  fs.unlinkSync(path.join(destination, '安装与使用.html'));
+  fs.writeFileSync(path.join(destination, 'guide', 'my-notes.html'), 'keep this file');
+  invoke(false);
+  assert.equal(fs.existsSync(oldEntry), true, 'preview must not remove the old entry');
+  const updated = invoke(true);
+  assert.equal(fs.existsSync(oldEntry), false);
+  assert.equal(fs.existsSync(path.join(destination, '安装与使用.html')), true);
+  assert.equal(updated.manifest.files['guide/index.html'], undefined);
+  assert.equal(fs.readFileSync(path.join(destination, 'guide', 'my-notes.html'), 'utf8'), 'keep this file');
+});
+
+test('a manually edited legacy guide stops migration before any write or deletion', t => {
+  const { destination, invoke } = fixture(t);
+  const result = invoke(true);
+  const oldEntry = path.join(destination, 'guide', 'index.html');
+  const original = Buffer.from('<!doctype html><title>Original managed guide</title>');
+  result.manifest.files['guide/index.html'] = { sha256: hash(original), mode: 0o644 };
+  delete result.manifest.files['安装与使用.html'];
+  fs.writeFileSync(path.join(destination, 'manifest.json'), JSON.stringify(result.manifest));
+  fs.unlinkSync(path.join(destination, '安装与使用.html'));
+  fs.writeFileSync(oldEntry, 'handwritten guide');
+  const manifestBefore = fs.readFileSync(path.join(destination, 'manifest.json'));
+  assert.throws(() => invoke(true), /手工修改|未登记/);
+  assert.equal(fs.readFileSync(oldEntry, 'utf8'), 'handwritten guide');
+  assert.equal(fs.existsSync(path.join(destination, '安装与使用.html')), false);
+  assert.deepEqual(fs.readFileSync(path.join(destination, 'manifest.json')), manifestBefore);
 });
 
 test('a bad last package, mixed version, or incomplete license cannot cause a partial write', t => {
