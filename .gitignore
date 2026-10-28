@@ -3,4 +3,16 @@ dist/
 cli/assets/*.gz
 .DS_Store
 .test-output/
+
+# Local credentials
+.env
+.env.*
+!.env.example
+.npmrc
+.vsce
+.ovsx
+*.pem
+*.key
+*.p12
+*.pfx
 *.vsix

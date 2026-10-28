@@ -1,255 +1,112 @@
-# Gridiff — Visual Table Diff
+<h1 align="center">Gridiff</h1>
 
-在本地浏览器或 VS Code、Cursor 等兼容编辑器中以表格方式查看 CSV、XLSX 差异。Gridiff 按主键对齐记录、按字段名对齐列，让你直接看到哪个字段从什么值改成了什么值。
+<p align="center">
+  <strong>看清每一个单元格的变化。</strong><br>
+  在浏览器、VS Code 或 Cursor 中，以表格方式审阅 CSV 与 XLSX。
+</p>
 
-适合审阅游戏配置、数据表和 Excel 工作簿，支持一行表头、Mova 四行表头及自定义表头。所有比较均只读。
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=sunneeyang.gridiff"><img alt="VS Code Marketplace" src="docs/images/badge-marketplace.svg"></a>
+  <a href="https://open-vsx.org/extension/sunneeyang/gridiff"><img alt="Open VSX Registry" src="docs/images/badge-openvsx.svg"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="docs/images/badge-license.svg"></a>
+</p>
 
-## 图文安装与使用指南
+<p align="center">
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#配合-fork-使用">Fork 配置</a> ·
+  <a href="docs/INSTALL.md">安装指南</a> ·
+  <a href="docs/USAGE.md">使用手册</a>
+</p>
 
-第一次使用可双击与本 README 同级的 [安装与使用.html](安装与使用.html)，也可阅读 [Markdown 安装说明](docs/INSTALL.md)。交互指南需与 `docs/guide/` 资源目录一起下载，可按 macOS / Windows / Linux 和 VS Code / Cursor / 仓库自带 Gridiff 选择步骤。它不依赖开发服务器或联网资源；安装扩展仍需要网络。在 GitHub 上直接点 HTML 只会显示源码。
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/preview-dark.png">
+  <img src="docs/images/preview-light.png" alt="Gridiff 表格对比：火球伤害从 120 改为 150，闪电记录删除，治疗记录新增；旧值标红，新值标绿。" width="1080">
+</picture>
 
-团队成员更新 design 仓库后，可直接打开 `gridiff/安装与使用.html`。网页仅辅助识别系统，工具和本机路径由用户确认。
+<p align="center"><sub>实际比较界面，使用虚构演示数据。新增、删除和修改在同一张表中展示。</sub></p>
 
-## 独立程序：在浏览器中比较
+Gridiff 按主键对齐记录、按字段名对齐列，让你直接看到“哪条记录的哪个字段，从什么值改成了什么值”。适合游戏配置、策划表和 Excel 工作簿审阅，比较过程只读，不改写源文件，也不上传表格数据。
 
-独立 Gridiff 可作为 Fork 的外部 diff 工具，不依赖 Mova、VS Code 或额外安装的 Node.js。团队可以像 Mova 一样把各平台程序托管在 design 仓库中，成员正常更新仓库即可使用，无需单独下载。当前已有市场版本仍是编辑器扩展。
+## 为什么用 Gridiff
 
-### Fork 配置
+- **按表格理解变化**：插入一行或调整列顺序后，仍可按主键和字段名查看对应记录。
+- **保留阅读上下文**：新增、删除、修改按源表顺序放在一起；未变化的单元格弱化显示。
+- **适配配置表**：支持普通表头、自定义多行表头、Mova 四行表头与竖表；保留文本前导零和长 ID。
+- **缩小审阅范围**：搜索当前工作表全部记录，筛选变动记录与字段，按页查看；XLSX 可选择首表、全部表或指定表。
+- **选择熟悉的环境**：独立程序在默认浏览器展示，扩展在 VS Code / Cursor 中独立运行。比较网页默认跟随系统明暗，并提供多套配色；插件跟随编辑器主题。
 
-维护者将构建结果同步到 design 后，只需配置一次：
+## 快速开始
 
-1. 打开 Fork 的设置，进入 **Integration → External Diff Tool**，选择自定义工具，打开 **Edit Diff Tool** 对话框。
-2. **File Path** 点击文件夹图标，选择 `<design>/gridiff/gridiff`；Windows 选择 `<design>\gridiff\gridiff.cmd`。选择顶层统一入口即可，它会自动识别系统和 CPU。
-3. **Arguments 设置为 `$REMOTE $LOCAL`**：旧文件在前，新文件在后。无需添加 `diff`、`--wait` 或其他参数，也不要给占位符加引号。兼容 `diff $REMOTE $LOCAL` 写法。
-4. 点击 **Edit** 保存。在 Fork 中选中 CSV 或 XLSX 文件，使用“外部 Diff”打开，即可在默认浏览器中查看表格差异。
+先选择你想在哪里看差异：
 
-这里配置的是 **External Diff Tool**；合并工具 **Merge Tool** 保持原来的设置即可。Gridiff 会读取两侧文件并打开默认浏览器；命令返回后，Fork 可以清理临时文件，浏览器继续使用已经读入的快照。
+| 使用方式 | 安装与打开 |
+| --- | --- |
+| **VS Code** | 在扩展面板搜索 `@id:sunneeyang.gridiff`，安装 **Gridiff — Visual Table Diff**，然后打开 CSV 或 XLSX 差异。 |
+| **Cursor** | 在 Cursor 扩展面板搜索同一扩展 ID；搜索不到时，从 [Open VSX](https://open-vsx.org/extension/sunneeyang/gridiff) 下载 VSIX，通过 **Install from VSIX…** 安装。 |
+| **浏览器 / 策划库自带程序** | 团队仓库已有 `gridiff/` 时，更新仓库及 Git LFS 文件，然后双击其中与 README 同级的 **安装与使用.html**，按向导配置 Fork。无需安装编辑器或额外运行时。 |
 
-独立 Gridiff 的参数约定是 `gridiff <旧文件> <新文件>`，始终以第一份为基准，查看第二份的新增、删除和修改，与 VS Code / Cursor 的 `--diff` 及插件的 `original` / `modified` 顺序一致，不根据路径、提交号或内容猜测方向。反向审阅时可交换调用参数，或点击 **交换左右**。
+确认扩展发布者为 **sunneeyang**。编辑器扩展无需安装独立 Gridiff 程序；仅打开单个文件不会启动对比。
 
-独立版仅按扩展名识别 `.csv` 和 `.xlsx`（不区分大小写），不根据内容猜测类型。其他后缀或无后缀文件会打开网页，明确提示不支持并列出支持格式；不会读取内容、尝试解析或自动转交其他工具。CSV 与 XLSX 混合比较也会显示提示。新增/删除使用的同类型空文件及 `/dev/null`（Windows 为 `NUL`）仍支持。Fork 的临时文件须保留原扩展名；非表格文件请使用 Fork 内置对比。
+> **第一次使用？** 从 [图文安装说明](docs/INSTALL.md) 开始。仓库根目录的 [安装与使用.html](安装与使用.html) 可离线按系统和工具展示步骤，支持复制参数、明暗切换与配色选择。下载时保留 `docs/guide/` 资源目录；GitHub 直接打开 HTML 会显示源码。
 
-二进制通过 Git LFS 托管。若入口提示文件仍是 LFS 指针，先在 design 仓库执行 `git lfs pull`；入口不会自动联网下载或修改仓库。独立使用时，也可以从某个平台的 ZIP 中取出单个可执行文件直接调用。
+独立程序的源码构建与团队仓库分发见 [开发文档](DEVELOPMENT.md#独立程序)。源码仓库不直接携带可执行程序。
 
-也可以直接从终端运行（含空格的路径在终端中需要引号）：
+## 配合 Fork 使用
+
+在 Fork 的 **Settings / Preferences → Integration → External Diff Tool** 中配置一次。Fork 支持 macOS 和 Windows；Linux 可从终端或编辑器独立使用 Gridiff。
+
+| 目标工具 | Fork 中的选择 / File Path | Arguments |
+| --- | --- | --- |
+| **VS Code** | 选择内置 **VSCode / Visual Studio Code** | 使用内置配置 |
+| **Cursor** | 选择自定义工具，定位 Cursor 的命令行入口 | `--wait --diff $REMOTE $LOCAL` |
+| **仓库自带 Gridiff** | 选择自定义工具，定位 `<仓库>/gridiff/gridiff`；Windows 选择 `gridiff.cmd` | `$REMOTE $LOCAL` |
+
+**所有入口统一为旧文件在前、新文件在后。** Fork 自定义工具必须按上表填写顺序，占位符不要加引号；Merge Tool 保持原设置。完整步骤与快捷键见 [安装说明](docs/INSTALL.md)，按系统展示的文件选择步骤和配图见 [离线图文指南](安装与使用.html)。
+
+在含有独立可执行程序的目录，也可以直接调用：
 
 ```sh
 ./gridiff "旧版本.csv" "新版本.csv"
-./gridiff "旧版本.xlsx" "新版本.xlsx"
+./gridiff --sheets all "旧版本.xlsx" "新版本.xlsx"
 ```
 
-网页、脚本和样式压缩后内嵌在 Go 可执行程序中，不携带 Bun、Node.js 或浏览器运行时。首次比较启动本地服务，使用随机端口和会话地址，仅监听 `127.0.0.1`；Go 并行解析两侧 CSV/XLSX、计算差异并保存内存模型，浏览器只接收当前页及可见字段。源数据与结果保存在内存，不生成 HTML 或数据临时文件，不上传外部服务。再次从 Fork 打开时，默认复用同一服务、浏览器页签，新比较替换当前内容。页签关闭后会重新打开；已有页签是否自动切到前台取决于浏览器和系统。不同程序构建各自复用服务。
+## 开始审阅
 
-在页面中调整格式、主键，以及搜索、筛选、翻页，都使用当前快照。**重新计算**不会重新读取磁盘；文件修改后从 Fork 再打开一次。浏览器版本不提供编辑器原生文本对比入口。
+1. **保存表格**。在 Fork 选择提交或本地修改，再单击文件列表中的 CSV / XLSX，右键选择 **External Diff**。文件列表获得焦点后，也可用 macOS `⌘D` / Windows `Ctrl+D`。
+2. **确认方向与对齐**。先核对顶部旧、新来源，再看“格式”和“主键”；通常保留自动识别即可。编辑器中也可运行 **Gridiff: 比较两个文件…**，依次选择旧、新版本。
+3. **查看变化**。使用原表对照或变更清单，通过搜索、筛选与分页定位记录。
 
-审阅后点击 **结束比较**，页面清空数据并停止服务。直接关闭标签时，服务在失去心跳 10 分钟后退出；启动后一直未打开页面则在 2 分钟后退出。浏览器刷新不会立即结束会话，筛选偏好保存在该标签的会话存储中；换文件时重置搜索词和页码。服务发现信息保存在用户缓存目录，不含表格数据。电脑休眠或浏览器长时间暂停后，会话可能过期，需要重新打开。
-
-页面顶部的 **明暗** 默认跟随系统，可手动固定为浅色或深色；**配色** 提供默认、GitHub、Catppuccin、Solarized、Nord，每套都有明暗版本。选择会保存到用户配置目录的 `gridiff/preferences.json`，以后打开的比较自动恢复。该文件仅记录两个主题选项，不包含表格数据。VS Code 插件继续使用编辑器主题。
-
-需要独立打开一次比较并让 Fork 等待审阅结束时使用 `--wait $REMOTE $LOCAL`，并在网页点击 **结束比较**；只关闭标签会等待超时回收。`--no-open` 复用服务并只输出地址，适用于终端或测试；`--help`、`--version` 和 `--licenses` 分别显示帮助、版本与完整许可声明。
-
-源码构建需要 Node.js 22+、npm 和 Go 1.26+：
-
-```sh
-npm ci --ignore-scripts
-npm run build:cli
-```
-
-默认产物位于 `dist/cli/gridiff-<平台>-<架构>/`，并生成同名 `.zip` 下载包。使用 `npm run build:cli -- --all` 可分别构建 macOS ARM64/x64、Linux ARM64/x64、Windows x64；发布时分别上传，使用者只下载自己平台的一个包。只运行独立程序不需要安装这些构建工具。平台构建与验证说明见 [DEVELOPMENT.md](DEVELOPMENT.md)。
-
-维护者一次构建全部平台后，可以同步到指定 design 仓库。默认命令仅预览；`--apply` 会在所有平台身份、版本、哈希与许可证校验通过后写入 `gridiff/`，不会提交或推送：
-
-```sh
-npm run sync:project -- --project /path/to/design
-npm run sync:project -- --project /path/to/design --apply
-```
-
-### 性能诊断
-
-在已打开的比较页地址末尾加 `#profile=1` 后重新加载，浏览器开发者工具的 Console 中会出现 `[Gridiff perf]` 日志（需显示 Debug/Verbose 级别）。记录文件读取、XLSX 解析、比较、本地接口往返和页面绘制等阶段的耗时，以及字节数、行列数；不记录文件路径、工作表名称或单元格内容。默认不开启控制台日志。
-
-最近 500 条记录保存在当前页面的 `window.gridiffPerf.events` 中，刷新即重新计数，不自动写日志文件。可重复的性能矩阵运行方法及测量口径见 [DEVELOPMENT.md](DEVELOPMENT.md)。
-
-## 编辑器扩展：开始使用
-
-需要 **VS Code 1.85 或更高版本**，或支持相应扩展 API 的兼容编辑器（例如 Cursor）。
-
-Gridiff 同时发布到以下两个扩展市场，扩展 ID 均为 `sunneeyang.gridiff`：
-
-| 编辑器 | 安装入口 |
+| 标记 | 含义 |
 | --- | --- |
-| VS Code | [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=sunneeyang.gridiff) |
-| VSIX 备用下载（编辑器内搜索不到时） | [Open VSX Registry](https://open-vsx.org/extension/sunneeyang/gridiff) |
+| **+ 新增** | 绿色新值，只展示新增内容 |
+| **− 删除** | 红色旧值，只展示移除内容 |
+| **~ 修改** | 同一单元格显示旧值、新值，并突出变化片段 |
+| **灰色文字** | 未变化的值，保留阅读上下文 |
 
-1. 在 VS Code 或 Cursor 的扩展面板搜索 `@id:sunneeyang.gridiff`，安装 **Gridiff — Visual Table Diff**（发布者 `sunneeyang`）。Cursor 使用自己的扩展市场；若搜索不到，可从 Open VSX 下载 VSIX，再通过扩展面板的 **Install from VSIX…（从 VSIX 安装）** 安装。
-2. 在编辑器的源代码管理中打开一个 `.csv` 或 `.xlsx` 文件的差异。Gridiff 默认自动打开表格对比。
-3. 检查顶部的 **格式** 和 **主键**，根据需要调整，然后审阅新增、删除和修改的记录。
+文件修改后，**网页模式从 Fork 再打开一次**，“重新计算”只使用已有快照；**插件模式点击“重新读取”**。审阅结束时，网页可点“结束比较”；插件经 Fork 的 `--wait` 启动时，还需关闭原始差异标签，Fork 才会结束等待。
 
-比较任意两份 CSV 或两份 XLSX 时，打开命令面板，运行 **Gridiff: 比较两个文件…**，依次选择旧版本、新版本。仅打开单个文件不会启动对比。
+## 支持范围
 
-## 打开比较的其他方式
-
-| 场景 | 操作 |
+| 项目 | 当前行为 |
 | --- | --- |
-| 已打开文本差异页 | 点击编辑器右上角的表格图标，或运行 **Gridiff: 以表格方式查看当前差异** |
-| 与当前 Git 提交比较 | 在资源管理器右键 CSV 或 XLSX，选择 **Gridiff: 与 HEAD 比较**；需要在编辑器中打开所属仓库 |
-| 同时选中两份文件 | 在资源管理器中选中两份 CSV 或两份 XLSX，右键选择 **Gridiff: 比较两个文件…**；方向不对时点击 **交换左右** |
-| 分别选择旧、新文件 | 先在旧文件上选择 **Gridiff: 选择为旧版本**，再在新文件上选择 **Gridiff: 与所选旧版本比较** |
+| 文件 | UTF-8 CSV、XLSX；只比较两份同格式文件，不支持 `.xls`、TSV 或加密工作簿 |
+| 工作表 | **插件默认读取全部表，独立程序默认只读首表**；两者均可配置读取范围 |
+| 公式 | 比较文件中保存的结果，不重算公式；字体、颜色、图表等排版变化不参与比较 |
+| 独立程序平台 | macOS ARM64 / x64、Linux ARM64 / x64、Windows x64；未提供 Windows ARM64 原生程序 |
+| 数据上限 | 单侧文件最多 8 MiB；XLSX 解压大小和单元格数量另有预算，见 [完整限制](docs/USAGE.md#当前限制) |
 
-其他文件会使用编辑器原生文本对比。比较 CSV 时也可以点击 **文本对比** 查看原文。
+macOS ARM64 的 Fork CSV / XLSX 对比已验证；其余平台完成交叉构建，Windows、Linux 与远程工作区尚未完成实机验收。
 
-### XLSX 工作簿
+## 项目文档
 
-通过 **比较两个文件…**、资源管理器右键菜单或 **与 HEAD 比较** 打开 XLSX。工作表读取范围可配置：
-
-| 范围 | 行为 |
+| 文档 | 内容 |
 | --- | --- |
-| `all` | 读取全部工作表（含隐藏表），按名称配对；名称不同的表显示新增/删除。**插件默认值**。 |
-| `first` | 只读工作簿顺序中的第一张表（含隐藏首表），两侧按位置配对；改名不会产生整表增删。**独立程序默认值**。 |
-| `named` | 按指定的完整表名读取多张表，区分大小写，按名称配对；结果仍遵循工作簿顺序。 |
+| [安装说明](docs/INSTALL.md) | 三种安装路线、Fork 配置、快捷键与常见问题 |
+| [离线图文指南](安装与使用.html) | 下载后本地打开，按系统与工具逐步操作 |
+| [使用与配置](docs/USAGE.md) | 主键、表头、Mova 规则、XLSX 语义、筛选分页与限制 |
+| [插件说明](README.extension.md) | VS Code / Cursor 专用使用说明，也是 VSIX 的 README 来源 |
+| [开发与发布](DEVELOPMENT.md) | 构建、测试、团队仓库同步与发布流程 |
+| [性能记录](PERFORMANCE.md) | 测量方法、环境和优化结果 |
+| [更新记录](CHANGELOG.md) | 版本变化 |
 
-插件在设置中修改 **Gridiff › Xlsx Sheets**，选择 `named` 时再填写 **Gridiff › Xlsx Sheet Names**。也可在 VS Code 的用户设置或工作区 `.vscode/settings.json` 中配置：
-
-```json
-{
-  "gridiff.xlsxSheets": "named",
-  "gridiff.xlsxSheetNames": ["装备数据", "技能数据"]
-}
-```
-
-改动后点击 **重新读取** 或重新打开比较。选择 `first` 时，与 Mova 主导出的读取范围一致；首表由工作簿顺序确定，不取决于当前激活的标签或内部 `sheet1.xml` 文件名。重新排序会改变首表模式的比较对象。
-
-独立程序使用启动参数选择范围；原来的 Fork 配置不加参数时仍只读首表：
-
-```sh
-gridiff --sheets all "旧版本.xlsx" "新版本.xlsx"
-gridiff --sheets first "旧版本.xlsx" "新版本.xlsx"
-gridiff --sheet "装备数据" --sheet "技能数据" "旧版本.xlsx" "新版本.xlsx"
-```
-
-`--sheet` 可重复，完整名称中的空格、中文、逗号均可保留；不能与 `--sheets` 同用。需要让 Fork 读取全部表时，将 Arguments 改为 `--sheets all $REMOTE $LOCAL`。切换范围仍复用同一服务和页签。页面内的工作表下拉框用于切换已加载的表；扩大读取范围需修改启动参数后再次打开。
-
-指定表只存在于一侧时显示新增或删除；只要某个指定名称在两侧都不存在，就明确报错，避免拼错名称后漏看变更。每张表可以独立设置表头和主键。未选中的工作表在解压前剔除；共享字符串、样式和日期信息仍会读取。跨表公式只使用已保存的结果，无需解析未选中的依赖表。
-
-- 区分文本、数字、布尔值、日期和错误值；文本前导零和长 ID 会保留。数值超出 JavaScript 安全整数精度时提示错误，请将这类 ID 存为文本。
-- 按值和类型对齐、比较；同一类型内的显示格式变化不算值修改。日期根据 Excel 数字格式识别、规范化到毫秒精度；日期与普通数字互转会视为类型变化。类型不同或格式化后看不出差异时，会显示类型和底层值。
-- 只比较公式在文件中保存的结果，不比较或显示公式表达式；公式变化但结果相同不会显示为修改，缺少缓存结果时按空值处理。Gridiff 不重新计算公式，也不请求外部链接；请先在 Excel 中计算并保存最新结果。
-- 只读取已保存的 XLSX；先在 Excel 中保存，再点击 **重新读取**。合并区域只读取左上角的值，不将其复制到每一格。
-- 不比较字体、颜色、边框、图表、批注、超链接目标等非单元格数据。暂不支持 `.xls`、加密文件及 XLSX 与 CSV 混合比较。
-
-通过 Fork 的 `--diff` 或源代码管理打开 XLSX 差异时，Gridiff 会自动读取两个文件的二进制内容并展示表格。原生差异标签可能提示文件为二进制，无需点击 **Open Anyway**；该标签会保留以维持 Fork 的等待状态。
-
-### 配合 Fork 使用
-
-先在要使用的 VS Code 或 Cursor 中安装 Gridiff。通过 Fork 的外部工具打开 CSV 或 XLSX 差异后，Gridiff 默认自动显示表格。
-
-**VS Code**：在 Fork 中选择内置的 **Visual Studio Code** 外部 diff 工具即可。
-
-**Cursor（macOS）**：在 Fork 中选择自定义外部 diff 工具，按以下内容填写。
-
-File Path（默认安装位置）：
-
-```text
-/Applications/Cursor.app/Contents/Resources/app/bin/cursor
-```
-
-Arguments：
-
-```text
---wait --diff $REMOTE $LOCAL
-```
-
-文件参数始终是旧版本在前、新版本在后。本机 Fork 的提交历史对比中，`$REMOTE` 是父提交、`$LOCAL` 是当前提交，因此使用上述顺序。在 Arguments 输入框中不要给占位符或整串参数加引号。`--diff` 用于进入差异对比模式，`--wait` 用于让 Fork 等待审阅结束。
-
-审阅结束后，需要关闭原始文本差异标签，Fork 才会结束等待；仅关闭 Gridiff 表格不会结束等待。
-
-## 看懂表格
-
-**原表对照**把新增、删除、修改记录放在同一张表中，以新文件的记录顺序为主；删除记录参照旧文件中的相邻记录放置。表头和记录标识固定，长文本完整换行，可选中复制。
-
-| 内容 | 展示方式 |
-| --- | --- |
-| 新增记录 | 绿色的新值 |
-| 删除记录 | 红色的旧值 |
-| 修改的单元格 | 同时显示旧值、新值，并突出变化片段 |
-| 未变化的单元格 | 灰色文字，保留阅读上下文 |
-| 字段结构或记录顺序变化 | 单独提示 |
-
-**变更清单**按记录列出字段变化，适合逐条审阅。两种视图都支持搜索、筛选和分页。
-
-默认开启 **仅看变动记录** 和 **仅看变动字段**。显示的列取“新增记录中有值的字段”与“已有记录中变化的字段”的并集；只有删除记录时，显示被删除记录中有值的字段。列集合按整次比较确定，搜索和翻页不会改变表头，因此同一列里仍可能出现灰色的未变化值。取消字段筛选即可查看全部列。
-
-## 表头与记录对齐
-
-Mova 竖表默认使用第三列 `name`（名称）作为主键；其他表优先使用 `id` 字段，没有 `id` 时使用第一列。主键应在每份文件中唯一且非空；点击 **主键** 可以选择其他字段、组合主键，或按行号对齐。修改主键值会被视为删除旧记录并新增记录。
-
-| 格式 | 文件结构 |
-| --- | --- |
-| 自动 | 识别 Mova 四行表头或竖表，否则按一行表头读取 |
-| 普通 CSV | 第一条记录为字段名，后续为数据 |
-| Mova | 前四条记录依次为导出标记、类型、字段名、中文说明 |
-| Mova 竖表 | 无表头，每条记录依次为导出标记、类型、名称、说明、值；说明和值可留空 |
-| 无表头 | 所有记录均为数据，列名自动生成为“列1”“列2”等 |
-| 自定义多行表头 | 自行指定字段名、说明和数据起始记录 |
-
-支持 UTF-8（含 BOM）、CRLF/LF、引号内的逗号和换行、转义双引号。字段值按原字符串比较，保留前导零、大整数、空格和空值；数值增减提示仅辅助阅读。
-
-### Mova 表的处理规则
-
-- 按首列 `id` 对齐时，`id` 为空字符串的记录会标为“无主键记录”。它们按完整内容精确匹配并保留重复次数；无法匹配的分别显示新增、删除。空白字符及组合主键缺值仍会报错。
-- 四行表头的数据行只比较表头声明的字段，超出表头的尾列不显示、不计入差异。需要检查这些原始内容时，使用 **文本对比**。
-- 竖表适用于 CSV 和 XLSX 中的枚举、结构及配置表，例如 `all,int32,None,无,0`。保留每条记录的竖向顺序，不转置；类型、标记、说明和值的修改都在原单元格中对比。尾部附加列、停用行保留，名称为空字符串的记录按完整内容匹配。
-- 自动识别支持 Mova 常见类型、中文类型别名及多行自定义结构。无法识别的竖表（例如只有一行自定义类型）可手动选择 **Mova 竖表**；其他布局可选择 **无表头** 或 **自定义多行表头**。
-
-## 设置
-
-顶部的 **格式**、**主键** 调整只作用于当前比较。需要设置工作区默认值时，可在编辑器设置中搜索 `Gridiff`，或编辑 `settings.json`：
-
-```json
-{
-  "gridiff.autoOpenDiff": true,
-  "gridiff.format": "auto",
-  "gridiff.keyColumns": []
-}
-```
-
-| 设置 | 默认值 | 用途 |
-| --- | --- | --- |
-| `gridiff.xlsxSheets` | `all` | 插件的 XLSX 读取范围：`all`、`first` 或 `named` |
-| `gridiff.xlsxSheetNames` | `[]` | `named` 模式下精确匹配的工作表名称列表 |
-| `gridiff.autoOpenDiff` | `true` | CSV 或 XLSX 差异成为活动标签时自动打开 Gridiff |
-| `gridiff.format` | `"auto"` | `auto`、`csv`、`mova`、`mova-vertical`、`headerless` 或 `custom` |
-| `gridiff.keyColumns` | `[]` | 主键字段名数组；留空自动选择，多个字段组成组合主键 |
-| `gridiff.headerRow` | `1` | 自定义格式的字段名所在记录 |
-| `gridiff.dataStartRow` | `2` | 自定义格式的数据起始记录 |
-| `gridiff.descriptionRow` | `0` | 自定义格式的说明所在记录；`0` 表示没有说明 |
-
-记录编号从 1 开始，包含表头；引号内换行不会增加记录编号。
-
-## 常见问题
-
-**提示主键重复或缺失怎么办？** 先确认表头格式，再选择唯一且非空的字段或组合主键。也可按行号对齐，但插入、删除记录可能让后续记录错位。
-
-**为什么有些记录或列没显示？** 默认只显示变动记录和相关字段。取消顶部的两个筛选可查看全部内容。全空记录会被忽略并提示数量；Mova 超出表头的尾列按上述规则排除。
-
-**修改文件后为什么没有更新？** Gridiff 显示读取时的快照。CSV 包含编辑器中未保存的文本，XLSX 只读取磁盘中已保存的内容。文件修改后，点击 **重新读取**。
-
-**切回文本后，为什么没有再次自动打开？** 同一个文本差异标签只自动打开一次，方便你返回原文。可以使用手动命令，或关闭原差异标签后重新打开。
-
-**怎样自动更新？** 在 Gridiff 扩展的齿轮菜单中启用 **Auto Update**，并保持编辑器的扩展自动更新功能开启。更新由当前编辑器使用的扩展市场提供。通过 VSIX 安装的扩展默认关闭自动更新，需要手动开启。
-
-**用过早期本地版怎么办？** 早期版本的 ID 是 `gridiff.gridiff`。先卸载该版本，再安装 `sunneeyang.gridiff`，避免两个扩展同时响应差异；后续版本沿正式 ID 更新。
-
-## 当前限制
-
-- CSV 只支持逗号分隔、UTF-8 编码；另支持 XLSX，不支持 TSV。
-- 单侧文件最多 8 MiB；XLSX 解压后最多 128 MiB、10000 个包内文件、所选工作表累计最多 100 万单元格，有值区域矩形（含内部空白）之和最多 100 万格。两侧记录数之和乘以合并字段数，跨所选工作表累计最多 100 万单元格。压缩包目录中的总声明解压大小仍受 128 MiB 限制。独立程序使用 Go 并行解析双侧，浏览器只接收当前页与可见字段；VS Code 宿主仍依次解析。每页最多 100 条记录，宽表会减少每页行数。
-- 提供只读审阅，不提供编辑、合并或自动刷新。自动打开适用于 CSV 和 XLSX 的标准差异标签，不接管 Notebook、自定义编辑器或合并编辑器。
-- 重复或空字段名、错误的 CSV 引号，以及普通 CSV 中超出表头的非空列，会提示错误；可调整格式或切换文本对比。
-- Windows、Linux、远程工作区以及 Fork 完整联调尚未完成验证。
-
-## 数据与许可
-
-Gridiff 不向外部服务发送 CSV 内容，不改写源文件，也不修改 Git 索引。单元格内容按纯文本显示。
-
-采用 **MIT 许可证**，完整条款随扩展提供。
+Gridiff 使用 [MIT 许可证](LICENSE)。问题或建议可提交到 [GitHub Issues](https://github.com/SunneeYang/gridiff/issues)。

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="122" height="20" role="img" aria-label="Open VSX Registry">
+  <title>Open VSX Registry</title>
+  <clipPath id="badge"><rect width="122" height="20" rx="3"/></clipPath>
+  <g clip-path="url(#badge)"><rect width="63" height="20" fill="#454b53"/><rect x="63" width="59" height="20" fill="#5264a0"/></g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,DejaVu Sans,sans-serif" font-size="11"><text x="31.5" y="14">Open VSX</text><text x="92.5" y="14">Registry</text></g>
+</svg>
