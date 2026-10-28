@@ -4,6 +4,12 @@
 
 适合审阅游戏配置、数据表和 Excel 工作簿，支持一行表头、Mova 四行表头及自定义表头。所有比较均只读。
 
+## 图文安装与使用指南
+
+第一次使用请看 [安装与使用](docs/INSTALL.md)。交互指南位于 `docs/guide/index.html`，下载完整目录后双击打开，可按 macOS / Windows / Linux 和 VS Code / Cursor / 仓库自带 Gridiff 选择步骤。它不依赖开发服务器或联网资源；安装扩展仍需要网络。在 GitHub 上直接点 HTML 只会显示源码。
+
+团队成员更新 design 仓库后，可直接打开 `gridiff/guide/index.html`。网页仅辅助识别系统，工具和本机路径由用户确认。
+
 ## 独立程序：在浏览器中比较
 
 独立 Gridiff 可作为 Fork 的外部 diff 工具，不依赖 Mova、VS Code 或额外安装的 Node.js。团队可以像 Mova 一样把各平台程序托管在 design 仓库中，成员正常更新仓库即可使用，无需单独下载。当前已有市场版本仍是编辑器扩展。
@@ -14,10 +20,12 @@
 
 1. 打开 Fork 的设置，进入 **Integration → External Diff Tool**，选择自定义工具，打开 **Edit Diff Tool** 对话框。
 2. **File Path** 点击文件夹图标，选择 `<design>/gridiff/gridiff`；Windows 选择 `<design>\gridiff\gridiff.cmd`。选择顶层统一入口即可，它会自动识别系统和 CPU。
-3. **Arguments 保持默认的 `$LOCAL $REMOTE`**，无需添加 `diff`、`--wait` 或其他参数，也不要给占位符加引号。如果之前填了 `diff $LOCAL $REMOTE`，该写法仍然兼容。
+3. **Arguments 设置为 `$REMOTE $LOCAL`**：旧文件在前，新文件在后。无需添加 `diff`、`--wait` 或其他参数，也不要给占位符加引号。兼容 `diff $REMOTE $LOCAL` 写法。
 4. 点击 **Edit** 保存。在 Fork 中选中 CSV 或 XLSX 文件，使用“外部 Diff”打开，即可在默认浏览器中查看表格差异。
 
 这里配置的是 **External Diff Tool**；合并工具 **Merge Tool** 保持原来的设置即可。Gridiff 会读取两侧文件并打开默认浏览器；命令返回后，Fork 可以清理临时文件，浏览器继续使用已经读入的快照。
+
+独立 Gridiff 的参数约定是 `gridiff <旧文件> <新文件>`，始终以第一份为基准，查看第二份的新增、删除和修改，与 VS Code / Cursor 的 `--diff` 及插件的 `original` / `modified` 顺序一致，不根据路径、提交号或内容猜测方向。反向审阅时可交换调用参数，或点击 **交换左右**。
 
 独立版仅按扩展名识别 `.csv` 和 `.xlsx`（不区分大小写），不根据内容猜测类型。其他后缀或无后缀文件会打开网页，明确提示不支持并列出支持格式；不会读取内容、尝试解析或自动转交其他工具。CSV 与 XLSX 混合比较也会显示提示。新增/删除使用的同类型空文件及 `/dev/null`（Windows 为 `NUL`）仍支持。Fork 的临时文件须保留原扩展名；非表格文件请使用 Fork 内置对比。
 
@@ -38,7 +46,7 @@
 
 页面顶部的 **明暗** 默认跟随系统，可手动固定为浅色或深色；**配色** 提供默认、GitHub、Catppuccin、Solarized、Nord，每套都有明暗版本。选择会保存到用户配置目录的 `gridiff/preferences.json`，以后打开的比较自动恢复。该文件仅记录两个主题选项，不包含表格数据。VS Code 插件继续使用编辑器主题。
 
-需要独立打开一次比较并让 Fork 等待审阅结束时使用 `--wait $LOCAL $REMOTE`，并在网页点击 **结束比较**；只关闭标签会等待超时回收。`--no-open` 复用服务并只输出地址，适用于终端或测试；`--help`、`--version` 和 `--licenses` 分别显示帮助、版本与完整许可声明。
+需要独立打开一次比较并让 Fork 等待审阅结束时使用 `--wait $REMOTE $LOCAL`，并在网页点击 **结束比较**；只关闭标签会等待超时回收。`--no-open` 复用服务并只输出地址，适用于终端或测试；`--help`、`--version` 和 `--licenses` 分别显示帮助、版本与完整许可声明。
 
 源码构建需要 Node.js 22+、npm 和 Go 1.26+：
 
@@ -71,9 +79,9 @@ Gridiff 同时发布到以下两个扩展市场，扩展 ID 均为 `sunneeyang.g
 | 编辑器 | 安装入口 |
 | --- | --- |
 | VS Code | [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=sunneeyang.gridiff) |
-| Cursor 等使用 Open VSX 的兼容编辑器 | [Open VSX Registry](https://open-vsx.org/extension/sunneeyang/gridiff) |
+| VSIX 备用下载（编辑器内搜索不到时） | [Open VSX Registry](https://open-vsx.org/extension/sunneeyang/gridiff) |
 
-1. 在编辑器的扩展面板搜索 `@id:sunneeyang.gridiff`，安装 **Gridiff — Visual Table Diff**，也可使用上表中的市场入口。
+1. 在 VS Code 或 Cursor 的扩展面板搜索 `@id:sunneeyang.gridiff`，安装 **Gridiff — Visual Table Diff**（发布者 `sunneeyang`）。Cursor 使用自己的扩展市场；若搜索不到，可从 Open VSX 下载 VSIX，再通过扩展面板的 **Install from VSIX…（从 VSIX 安装）** 安装。
 2. 在编辑器的源代码管理中打开一个 `.csv` 或 `.xlsx` 文件的差异。Gridiff 默认自动打开表格对比。
 3. 检查顶部的 **格式** 和 **主键**，根据需要调整，然后审阅新增、删除和修改的记录。
 
@@ -119,7 +127,7 @@ gridiff --sheets first "旧版本.xlsx" "新版本.xlsx"
 gridiff --sheet "装备数据" --sheet "技能数据" "旧版本.xlsx" "新版本.xlsx"
 ```
 
-`--sheet` 可重复，完整名称中的空格、中文、逗号均可保留；不能与 `--sheets` 同用。需要让 Fork 读取全部表时，将 Arguments 改为 `--sheets all $LOCAL $REMOTE`。切换范围仍复用同一服务和页签。页面内的工作表下拉框用于切换已加载的表；扩大读取范围需修改启动参数后再次打开。
+`--sheet` 可重复，完整名称中的空格、中文、逗号均可保留；不能与 `--sheets` 同用。需要让 Fork 读取全部表时，将 Arguments 改为 `--sheets all $REMOTE $LOCAL`。切换范围仍复用同一服务和页签。页面内的工作表下拉框用于切换已加载的表；扩大读取范围需修改启动参数后再次打开。
 
 指定表只存在于一侧时显示新增或删除；只要某个指定名称在两侧都不存在，就明确报错，避免拼错名称后漏看变更。每张表可以独立设置表头和主键。未选中的工作表在解压前剔除；共享字符串、样式和日期信息仍会读取。跨表公式只使用已保存的结果，无需解析未选中的依赖表。
 
@@ -148,10 +156,10 @@ File Path（默认安装位置）：
 Arguments：
 
 ```text
---wait --diff $LOCAL $REMOTE
+--wait --diff $REMOTE $LOCAL
 ```
 
-在 Fork 的 Arguments 输入框中，`$LOCAL` 和 `$REMOTE` 不要加引号，也不要给整串参数加引号。`--diff` 用于进入差异对比模式，`--wait` 用于让 Fork 等待审阅结束。
+文件参数始终是旧版本在前、新版本在后。本机 Fork 的提交历史对比中，`$REMOTE` 是父提交、`$LOCAL` 是当前提交，因此使用上述顺序。在 Arguments 输入框中不要给占位符或整串参数加引号。`--diff` 用于进入差异对比模式，`--wait` 用于让 Fork 等待审阅结束。
 
 审阅结束后，需要关闭原始文本差异标签，Fork 才会结束等待；仅关闭 Gridiff 表格不会结束等待。
 

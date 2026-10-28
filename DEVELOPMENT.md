@@ -1,6 +1,6 @@
 # Gridiff 开发与发布
 
-本文件供源码维护者使用，不随 VSIX 分发。面向用户的说明放在 README.md。
+本文件供源码维护者使用，不随 VSIX 分发。仓库使用说明放在 README.md；插件市场和 VSIX 使用 README.extension.md，只介绍编辑器扩展。
 
 ## 开发环境
 
@@ -54,7 +54,11 @@ npm run build:cli -- --all
 
 运行 `npm run build:cli -- --all` 后，用 `npm run sync:project -- --project /path/to/design` 预览，再加 `--apply` 写入。脚本校验五个平台的版本、构建来源、大小、SHA-256 与许可证，并要求 Go 源码及内嵌资源的构建输入摘要一致，避免混入旧包。在 `design/gridiff/` 内生成统一入口、平台程序、使用说明和清单；目录内的 `.gitattributes` 将程序交给 Git LFS 管理。它保留不受管理的文件，遇到受管理文件被手工改动会停止，不执行 Git 暂存、提交或推送。
 
-macOS/Linux 的 `gridiff` 和 Windows 的 `gridiff.cmd` 根据系统与 CPU 转发参数。当前支持 macOS/Linux ARM64 和 x64，以及 Windows x64；缺少程序或只取得 LFS 指针时给出明确提示。Fork 只需选择入口，Arguments 保持默认的 `$LOCAL $REMOTE`；CLI 直接接受两个文件路径，同时兼容旧的 `diff` 前缀。成员更新 design 仓库及 LFS 对象即可使用。同步前后应检查 design 的 Git 状态；`manifest.json` 中的 `sourceDirty` 表示是否来自尚未提交的源码。
+`docs/guide/` 是可通过 `file://` 离线打开的静态图文指南，不需要构建或启动服务。`sync:project` 将清单中的 HTML、CSS、脚本和图片同步到 `design/gridiff/guide/`，缺少资源会在写入前报错；所有指南资源纳入目标清单的哈希校验。修改资源列表时同步更新脚本与同步测试。`docs/INSTALL.md` 提供 Markdown 入口与完整文字版。指南和设计辅助文件不随 VSIX 分发。
+
+macOS/Linux 的 `gridiff` 和 Windows 的 `gridiff.cmd` 根据系统与 CPU 转发参数。当前支持 macOS/Linux ARM64 和 x64，以及 Windows x64；缺少程序或只取得 LFS 指针时给出明确提示。Fork 选择统一入口，Arguments 设置为 `$REMOTE $LOCAL`。CLI 按 `<旧文件> <新文件>` 接受两个路径，同时兼容旧的 `diff` 前缀。成员更新 design 仓库及 LFS 对象即可使用。同步前后应检查 design 的 Git 状态；`manifest.json` 中的 `sourceDirty` 表示是否来自尚未提交的源码。
+
+CLI、后台启动、私有提交协议和快照统一使用 `[旧, 新]`，以第一份为基准查看第二份的变化，不做参数重映射。插件遵循 VS Code / Cursor 的 `original=旧`、`modified=新`。`cli/input_order_test.go` 同时覆盖公开入口和内部快照约定，确保路径或提交号不参与方向判断。
 
 ## 验证
 
@@ -105,12 +109,12 @@ XLSX 先流式检查 ZIP 解压大小和 XML 坐标，再加载工作簿；不�
 ## 发布
 
 1. 保持扩展 ID `sunneeyang.gridiff` 不变，递增 `package.json` 和 `package-lock.json` 中的版本号。
-2. 更新用户说明；按改动范围运行验证。仅改文档时核对 Markdown、链接和最终安装包，不必重复运行全部界面测试。
+2. 更新用户说明；插件说明修改 README.extension.md，独立程序说明修改 README.md。按改动范围运行验证。仅改文档时核对 Markdown、链接和最终安装包，不必重复运行全部界面测试。
 3. 运行 `npm run package`，检查包内的发布者、版本、MIT 许可证和 README。排除测试数据、截图、开发依赖及本文件。
 4. 将同一个 VSIX 分别上传到 Visual Studio Marketplace 和 Open VSX。Marketplace 发布者和 Open VSX 命名空间均使用 `sunneeyang`，与包内 `publisher` 一致。Open VSX 需完成 Publisher Agreement 签署及命名空间所有权验证。
 5. 分别等待两个市场验证，确认各自公开页面显示新版本和新说明，并可下载安装包。Open VSX 的 `under review` 或 `inactive` 状态不代表已公开发布。上传成功、市场可安装和客户端实际更新是不同状态。
 
-README 是两个市场详情的来源，修改本地文件不会直接更新已上架页面，需要重新打包并发布到两个市场。没有公开源码仓库时，不在 README 中使用依赖仓库地址的相对图片或文档链接。
+package.json 的 `vsce.readmePath` 指向 README.extension.md，`npm run package` 和 `npm run release` 都将它打包为 VSIX 中的 readme.md；仓库 README.md 被排除。README.extension.md 是两个市场详情的来源，修改本地文件不会直接更新已上架页面，需要重新打包并发布到两个市场。没有公开源码仓库时，不在说明中使用依赖仓库地址的相对图片或文档链接。
 
 `package.json` 中的 `private: true` 用于防止误发到 npm，不影响 Visual Studio Marketplace 或 Open VSX 发布。许可证检查已开启，不使用 `--skip-license`。
 

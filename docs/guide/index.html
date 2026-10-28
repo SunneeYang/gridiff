@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="为策划和非技术同事准备的 Gridiff 安装与使用指南。按系统、工具逐步配置 Fork，查看 CSV 和 XLSX 表格差异。">
+  <title>Gridiff 安装与使用指南</title>
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="guide.css">
+  <script src="guide.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#content">跳到操作步骤</a>
+  <div class="layout">
+    <aside class="sidebar">
+      <a class="wordmark" href="#os=macos&tool=native&step=1" aria-label="Gridiff 指南首页">Gridiff<span class="wordmark-dot" aria-hidden="true">.</span></a>
+      <p class="sidebar-label">安装与使用指南</p>
+      <nav id="step-nav" aria-label="指南步骤">
+        <ol>
+          <li><button type="button" data-step="1"><span class="step-number">01</span><span>准备与安装</span></button></li>
+          <li><button type="button" data-step="2"><span class="step-number">02</span><span>配置 Fork</span></button></li>
+          <li><button type="button" data-step="3"><span class="step-number">03</span><span>打开第一次对比</span></button></li>
+          <li><button type="button" data-step="4"><span class="step-number">04</span><span>读懂变化与快捷键</span></button></li>
+          <li><button type="button" data-step="5"><span class="step-number">05</span><span>遇到问题</span></button></li>
+        </ol>
+      </nav>
+      <p class="sidebar-note">只读查看 CSV / XLSX<br>不改动你的表格</p>
+    </aside>
+
+    <main>
+      <header class="page-header">
+        <div class="page-top">
+          <p class="eyebrow">GRID DIFF / QUICK START</p>
+          <div class="appearance-controls" role="group" aria-label="页面主题">
+            <label for="theme-mode">明暗
+              <select id="theme-mode">
+                <option value="system">跟随系统</option>
+                <option value="light">浅色</option>
+                <option value="dark">深色</option>
+              </select>
+            </label>
+            <label for="theme-palette">配色
+              <select id="theme-palette">
+                <option value="cobalt">Cobalt · 默认</option>
+                <option value="nord">Nord</option>
+                <option value="solarized">Solarized</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <p id="theme-status" class="helper" role="status"></p>
+        <h1>配置一次，看清表格变化。</h1>
+        <p class="intro">先选电脑系统和想使用的工具，跟着下方步骤完成安装、配置和第一次对比。</p>
+      </header>
+
+      <section class="choices" aria-label="选择你的使用环境">
+        <div class="choice">
+          <label for="os">你的电脑系统</label>
+          <select id="os" aria-describedby="environment-note">
+            <option value="">请选择系统</option>
+            <option value="macos">macOS</option>
+            <option value="windows">Windows</option>
+            <option value="linux">Linux</option>
+          </select>
+        </div>
+        <div class="choice">
+          <label for="tool">你想在哪里看差异</label>
+          <select id="tool">
+            <option value="native">浏览器 · 策划库自带 Gridiff（推荐）</option>
+            <option value="vscode">VS Code · 安装 Gridiff 扩展</option>
+            <option value="cursor">Cursor · 安装 Gridiff 扩展</option>
+          </select>
+        </div>
+        <p id="environment-note" class="helper"></p>
+      </section>
+
+      <div id="route-summary" class="route-summary" aria-live="polite"></div>
+      <article id="content" tabindex="-1" aria-labelledby="step-title"></article>
+      <noscript><p class="notice">此分步指南需要浏览器允许 JavaScript。也可以阅读随仓库提供的 Markdown 安装与使用说明。</p></noscript>
+      <div class="step-actions">
+        <button id="previous" type="button">← 上一步</button>
+        <p id="step-position" aria-live="polite"></p>
+        <button id="next" class="primary" type="button">下一步 →</button>
+      </div>
+      <footer class="footer">
+        <p>Gridiff · 本地离线指南 · 检查日期 2026-10-28</p>
+        <p>界面文字可能随 Fork、编辑器版本变化；以实际安装版本为准。</p>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

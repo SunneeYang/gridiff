@@ -627,7 +627,7 @@ func run(args []string) error {
 		return nil
 	}
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "-h")) || (len(args) == 2 && args[0] == "diff" && (args[1] == "--help" || args[1] == "-h")) {
-		fmt.Printf("Gridiff %s — 本地浏览器表格对比\n\n用法：gridiff [--no-open] [--wait] <旧文件> <新文件>\n\nFork 自定义外部 Diff：选择 gridiff，Arguments 保持默认 $LOCAL $REMOTE。\n兼容旧用法：gridiff diff <旧文件> <新文件>。\n支持 CSV 和 XLSX，只读比较，自动打开默认浏览器。\n数据保存在内存，不生成 HTML 或数据临时文件。\n\n  --no-open   仅打印地址，不打开浏览器\n  --wait      独立打开，等待结束比较或超时后退出\n  --sheets first|all  XLSX 读取首表（默认）或全部工作表\n  --sheet 名称        指定工作表，可重复；不能与 --sheets 同用\n  --version   显示版本\n  --licenses  显示许可声明\n  --help      显示帮助\n\n默认复用服务和页签，新比较替换当前内容；完成文件快照后返回。\n未打开页面时 2 分钟退出，失去心跳后 10 分钟退出。\n", version)
+		fmt.Printf("Gridiff %s — 本地浏览器表格对比\n\n用法：gridiff [--no-open] [--wait] <旧文件> <新文件>\n\n第一文件为旧版本，第二文件为新版本；以旧为基准查看新文件的变化，不根据路径或内容猜方向。\nFork 外部 Diff：选择 gridiff，Arguments 设置为 $REMOTE $LOCAL。\n兼容旧用法：gridiff diff <旧文件> <新文件>。\n支持 CSV 和 XLSX，只读比较，自动打开默认浏览器。\n数据保存在内存，不生成 HTML 或数据临时文件。\n\n  --no-open   仅打印地址，不打开浏览器\n  --wait      独立打开，等待结束比较或超时后退出\n  --sheets first|all  XLSX 读取首表（默认）或全部工作表\n  --sheet 名称        指定工作表，可重复；不能与 --sheets 同用\n  --version   显示版本\n  --licenses  显示许可声明\n  --help      显示帮助\n\n默认复用服务和页签，新比较替换当前内容；完成文件快照后返回。\n未打开页面时 2 分钟退出，失去心跳后 10 分钟退出。\n", version)
 		return nil
 	}
 	if len(args) == 1 && args[0] == "--version" {

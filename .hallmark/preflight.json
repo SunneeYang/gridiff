@@ -1,0 +1,11 @@
+{
+  "date": "2026-10-28",
+  "scope": "docs/guide standalone offline manual",
+  "framework": "vanilla HTML/CSS/JavaScript; existing runtime has no web framework",
+  "fontEvidence": "media/main.css uses system and editor font fallbacks",
+  "paletteEvidence": "media/main.css uses theme custom properties; guide is a separate document",
+  "motion": "none installed; no decorative motion",
+  "themeRequirements": "Default to system appearance, offer light/dark switching and multiple palettes in-page; preserve the choice when browser storage is available",
+  "preserve": ["offline operation", "local font fallbacks", "existing product UI"],
+  "introduce": ["Cobalt guide tokens", "Narrative Workflow", "side-rail navigation"]
+}

@@ -5,6 +5,7 @@ const { createHash, randomBytes } = require('node:crypto');
 const { parseArgs } = require('node:util');
 
 const targets = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'windows-x64'];
+const guideFiles = ['index.html', 'guide.css', 'guide.js', 'theme.js', 'tokens.css', 'assets/fork-custom-default.png', 'assets/gridiff-example.png'];
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const attributes = `/bin/**/gridiff filter=lfs diff=lfs merge=lfs -text
 /bin/**/gridiff.exe filter=lfs diff=lfs merge=lfs -text
@@ -13,6 +14,9 @@ const attributes = `/bin/**/gridiff filter=lfs diff=lfs merge=lfs -text
 /README.md text eol=lf
 /manifest.json text eol=lf
 /LICENSES.txt text eol=lf
+/guide/*.html text eol=lf
+/guide/*.css text eol=lf
+/guide/*.js text eol=lf
 `;
 
 function inspectPath(file, type, allowMissing = false) {
@@ -73,6 +77,7 @@ function prepare(root, project) {
   add('gridiff.cmd', readFile(path.join(root, 'launchers', 'gridiff.cmd')).toString('utf8').replace(/\r?\n/g, '\r\n'));
   add('LICENSES.txt', license);
   add('.gitattributes', attributes);
+  for (const name of guideFiles) add(`guide/${name}`, readFile(path.join(root, 'docs', 'guide', name)));
   const sourceState = provenance.sourceDirty === true ? '含未提交修改的本地开发构建' : provenance.sourceDirty === false ? '源码工作区干净的构建；不代表已正式发布' : '来源工作区状态未知的构建';
   add('README.md', `# Gridiff 策划仓库入口
 
@@ -81,18 +86,22 @@ function prepare(root, project) {
 
 无需单独下载程序，也不需要安装 Node.js、Bun、Go、Mova 或 VS Code。程序已随此目录提供，网页由程序在本机提供；Go 完成解析、比较、搜索和分页，浏览器只接收当前页及可见字段，比较数据只保存在内存。
 
+## 图文安装与使用指南
+
+双击本目录的 [guide/index.html](guide/index.html)，按系统和工具查看分步说明，包含 VS Code、Cursor 和仓库自带 Gridiff 的安装、Fork 配置、快捷键及故障排查。指南默认跟随系统明暗，也可在页内切换浅色、深色和多套配色。指南可离线打开；安装编辑器扩展时需要联网。浏览器仅辅助识别系统，不能自动检查本机安装或修改 Fork 设置。
+
 ## Fork 配置
 
 1. 打开 Fork 设置 → Integration → External Diff Tool，选择自定义工具，打开 Edit Diff Tool 对话框。
 2. File Path 点击文件夹图标：macOS / Linux 选择本目录的 gridiff，Windows x64 选择本目录的 gridiff.cmd。
-3. Arguments 保持默认 \`$LOCAL $REMOTE\`，无需添加 diff、--wait 或其他参数，也不要给占位符加引号。
+3. Arguments 设置为 \`$REMOTE $LOCAL\`：旧文件在前，新文件在后。无需添加 diff、--wait 或其他参数，也不要给占位符加引号。
 4. 点击 Edit 保存；在 Fork 中选中 CSV 或 XLSX 文件，使用“外部 Diff”打开，即可在默认浏览器中查看表格差异。
 
-配置位置是 External Diff Tool；Merge Tool 保持原来的设置即可。之前填写的 \`diff $LOCAL $REMOTE\` 仍然兼容。
+配置位置是 External Diff Tool；Merge Tool 保持原来的设置即可。Gridiff 始终将第一文件作为旧版本、第二文件作为新版本，以第一份为基准查看第二份的变化，与 VS Code / Cursor 的 --diff 和插件顺序一致，不根据路径或内容猜方向。兼容 \`diff $REMOTE $LOCAL\` 写法。
 
 独立版仅按扩展名识别 CSV（.csv）和 XLSX（.xlsx），不区分大小写，不根据内容猜测。其他后缀、无后缀或 CSV/XLSX 混合比较会在网页提示不支持并列出支持格式，不读取内容或自动转交其他工具。新增/删除使用的同类型空文件及 /dev/null（Windows 为 NUL）仍支持。Fork 临时文件须保留原扩展名；非表格文件请使用 Fork 内置对比。
 
-XLSX 默认只读首表（含隐藏首表），两侧按位置配对。可用 \`--sheets all\` 读取全部表，或重复 \`--sheet "表名"\` 读取指定多表；全部/指定模式按名称配对，未选表不解压、不解析。Fork 读取全部表时 Arguments 使用 \`--sheets all $LOCAL $REMOTE\`。公式只使用已保存的结果，不重新计算。
+XLSX 默认只读首表（含隐藏首表），两侧按位置配对。可用 \`--sheets all\` 读取全部表，或重复 \`--sheet "表名"\` 读取指定多表；全部/指定模式按名称配对，未选表不解压、不解析。Fork 读取全部表时 Arguments 使用 \`--sheets all $REMOTE $LOCAL\`。公式只使用已保存的结果，不重新计算。
 
 Unix 入口自动选择 macOS/Linux 的 ARM64 或 x64 程序。Windows 目前提供 x64；ARM64 入口会明确提示未提供原生版本，不会静默选择错误程序。
 

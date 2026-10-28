@@ -15,11 +15,14 @@ test/**
 scripts/**
 cli/**
 launchers/**
+docs/**
+.hallmark/**
 media/browser.js
 media/themes.js
 media/themes.css
 dist/**
 package-lock.json
+README.md
 DEVELOPMENT.md
 PERFORMANCE.md
 THIRD_PARTY_NOTICES_BROWSER.txt

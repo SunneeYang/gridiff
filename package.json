@@ -2,7 +2,7 @@
   "name": "gridiff",
   "displayName": "Gridiff — Visual Table Diff",
   "description": "看清每一个单元格的变化。按主键和字段对齐 CSV、XLSX，可配置工作表读取范围，支持 Mova 多行表头。",
-  "version": "0.1.14",
+  "version": "0.1.17",
   "publisher": "sunneeyang",
   "repository": {
     "type": "git",
@@ -10,6 +10,9 @@
   },
   "license": "MIT",
   "private": true,
+  "vsce": {
+    "readmePath": "README.extension.md"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -169,6 +172,7 @@
     "test:binary": "node test/standalone-binary.cjs",
     "test:themes": "node test/themes.cjs",
     "test:go": "cd cli && go test ./...",
+    "test:guide": "node test/guide.cjs",
     "sync:project": "node scripts/sync-project.js",
     "benchmark": "node scripts/benchmark.cjs",
     "test:reuse": "node test/browser-reuse.cjs",

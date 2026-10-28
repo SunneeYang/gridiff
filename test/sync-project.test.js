@@ -17,6 +17,7 @@ function fixture(t) {
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const root = path.join(directory, 'source'), project = path.join(directory, 'design with spaces');
   fs.mkdirSync(path.join(root, 'launchers'), { recursive: true }); fs.mkdirSync(project);
+  fs.cpSync(path.join(__dirname, '..', 'docs', 'guide'), path.join(root, 'docs', 'guide'), { recursive: true });
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'gridiff', publisher: 'sunneeyang', version: '0.1.14' }));
   for (const name of ['gridiff', 'gridiff.cmd']) fs.copyFileSync(path.join(__dirname, '..', 'launchers', name), path.join(root, 'launchers', name));
   for (const target of targets) {
@@ -70,7 +71,14 @@ test('sync installs all platform binaries, launchers and nested LFS rules; unkno
   assert.ok(cmd.includes('setlocal DisableDelayedExpansion'));
   assert.ok(cmd.includes('Windows ARM64 native build is not available'));
   assert.match(fs.readFileSync(path.join(destination, 'README.md'), 'utf8'), /含未提交修改的本地开发构建/);
-  assert.ok(fs.readFileSync(path.join(destination, 'README.md'), 'utf8').includes('Arguments 保持默认 `$LOCAL $REMOTE`'));
+  const readme = fs.readFileSync(path.join(destination, 'README.md'), 'utf8');
+  assert.ok(readme.includes('Arguments 设置为 `$REMOTE $LOCAL`'));
+  assert.ok(readme.includes('第一文件作为旧版本、第二文件作为新版本'));
+  assert.ok(readme.includes('不根据路径或内容猜方向'));
+  assert.ok(readme.includes('guide/index.html'));
+  for (const name of ['index.html', 'guide.css', 'guide.js', 'theme.js', 'tokens.css', 'assets/fork-custom-default.png', 'assets/gridiff-example.png']) {
+    assert.equal(hash(fs.readFileSync(path.join(destination, 'guide', name))), result.manifest.files[`guide/${name}`].sha256);
+  }
   if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(destination, 'gridiff')).mode & 0o777, 0o755);
   fs.writeFileSync(path.join(destination, 'my-notes.txt'), 'keep me');
   invoke(true);
@@ -111,6 +119,13 @@ test('manual edits to managed files are preserved and stop the whole update befo
   assert.throws(() => invoke(true), /手工修改/);
   assert.deepEqual(fs.readFileSync(path.join(destination, 'bin/darwin-arm64/gridiff')), original);
   assert.equal(fs.readFileSync(path.join(destination, 'README.md'), 'utf8'), 'handwritten guidance');
+});
+
+test('an incomplete guide stops synchronization before writing any target file', t => {
+  const { root, destination, invoke } = fixture(t);
+  fs.unlinkSync(path.join(root, 'docs', 'guide', 'assets', 'gridiff-example.png'));
+  assert.throws(() => invoke(true), /ENOENT/);
+  assert.equal(fs.existsSync(destination), false);
 });
 
 test('source and destination symlink paths are rejected without touching the linked files', { skip: process.platform === 'win32' }, t => {
