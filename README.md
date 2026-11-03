@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>看清每一个单元格的变化。</strong><br>
-  在浏览器、VS Code 或 Cursor 中，以表格方式审阅 CSV 与 XLSX。
+  在浏览器、VS Code 或 Cursor 中审阅 CSV 与 XLSX，也可通过 CLI 和 Agent 技能读取完整差异。
 </p>
 
 <p align="center">
@@ -13,6 +13,7 @@
 
 <p align="center">
   <a href="#快速开始">快速开始</a> ·
+  <a href="#给-agent-使用">Agent / CLI</a> ·
   <a href="#配合-fork-使用">Fork 配置</a> ·
   <a href="docs/INSTALL.md">安装指南</a> ·
   <a href="docs/USAGE.md">使用手册</a>
@@ -37,13 +38,14 @@ Gridiff 按主键对齐记录、按字段名对齐列，让你直接看到“哪
 
 ## 快速开始
 
-先选择你想在哪里看差异：
+先选择使用方式：
 
 | 使用方式 | 安装与打开 |
 | --- | --- |
 | **VS Code** | 在扩展面板搜索 `@id:sunneeyang.gridiff`，安装 **Gridiff — Visual Table Diff**，然后打开 CSV 或 XLSX 差异。 |
 | **Cursor** | 在 Cursor 扩展面板搜索同一扩展 ID；搜索不到时，从 [Open VSX](https://open-vsx.org/extension/sunneeyang/gridiff) 下载 VSIX，通过 **Install from VSIX…** 安装。 |
 | **浏览器 / 策划库自带程序** | 团队仓库已有 `gridiff/` 时，更新仓库及 Git LFS 文件，然后双击其中与 README 同级的 **安装与使用.html**，按向导配置 Fork。无需安装编辑器或额外运行时。 |
+| **Agent / 脚本** | 使用对应平台的完整技能包或独立 CLI。Agent 从下方[调用流程](#给-agent-使用)开始；技能包内已携带 CLI，无需额外运行时。 |
 
 确认扩展发布者为 **sunneeyang**。编辑器扩展无需安装独立 Gridiff 程序；仅打开单个文件不会启动对比。
 
@@ -53,17 +55,25 @@ Gridiff 按主键对齐记录、按字段名对齐列，让你直接看到“哪
 
 ## 给 Agent 使用
 
-Gridiff 也提供通用 [Agent 技能](skills/gridiff/SKILL.md)，用于读取配置表差异、审查工作区或分支中的 CSV/XLSX 改动。技能包包含对应平台的 CLI，解压后将其中的 `gridiff/` 放入所用 agent 的技能目录即可，无需另装 Gridiff 或配置 PATH。技能源码本身不含可执行程序；维护者可按 [开发说明](DEVELOPMENT.md#agent-技能包) 生成完整安装包。
+Agent 比较 CSV/XLSX，或审查包含这些文件的配置改动时，按 [Gridiff 技能说明](skills/gridiff/SKILL.md) 准备输入和解读结果；已安装时优先读取安装目录内的 `SKILL.md`，以该目录定位程序。技能包包含对应平台的 CLI，解压后将其中的 `gridiff/` 放入所用 agent 的技能目录即可；只有源码时，按 [开发说明](DEVELOPMENT.md#agent-技能包) 生成完整包。
 
-CLI 可以直接把完整结果写入文件，供 agent 或脚本读取：
+1. **定位程序并确认方向**。从已安装技能目录调用 `bin/gridiff`，Windows 使用 `bin/gridiff.exe`，无需配置 PATH；先用包内程序的 `--help` 确认参数。旧版本在前，新版本在后。
+2. **生成报告**。日常分析用 `--temp-output`，CLI 自动选择平台用户缓存目录并返回一行实际文件路径。用户要求留档时改用 `--output <文件>`，两种输出模式互斥。
+3. **读取文件后得出结论**。CLI 退出后，用文件读取工具打开返回的路径；终端输出仅是文件路径，实际差异在 JSON 文件内。先看统计，再读取记录、字段和旧新值，同时核查值、字段结构及顺序变化。完整报告包含未变化记录，大文件只读了一部分时，结论也仅覆盖已核查部分。
+
+下面以 macOS/Linux 的技能包路径举例；Windows 使用 `bin/gridiff.exe`，PowerShell 通过 `&` 调用带引号的程序路径：
 
 ```sh
-gridiff --temp-output "旧版本.xlsx" "新版本.xlsx"
-gridiff --output "差异报告.json" "旧版本.xlsx" "新版本.xlsx"
-gridiff --output "差异报告.json" --key id --key profession "旧版本.csv" "新版本.csv"
+"<技能目录>/bin/gridiff" --temp-output "旧版本.xlsx" "新版本.xlsx"
+"<技能目录>/bin/gridiff" --temp-output --key id --key profession "旧版本.csv" "新版本.csv"
+"<技能目录>/bin/gridiff" --output "差异报告.json" "旧版本.xlsx" "新版本.xlsx"
 ```
 
-技能默认使用 `--temp-output`：CLI 自动选择平台用户缓存目录、打印报告路径，保留 72 小时并在后续临时调用时回收；需要留档时使用 `--output` 指定文件。报告包含所选范围内的全部记录、字段和旧新值，不受网页分页限制。XLSX 默认首表，也可使用 `--sheets all` 或 `--sheet 名称`。格式、主键、自定义表头及失败状态见 [报告与命令行参数](docs/USAGE.md#命令行报告)。
+**成功条件是退出码为 `0` 且报告 `complete: true`。** 非零退出时若仍返回报告路径，应读取其中的诊断；`complete: false` 或某张表失败不能当作无变化。解读字段、结构和类型变化前，读取 [JSON 报告约定](skills/gridiff/references/report.md)。
+
+XLSX 默认只比较首表，扩大范围须显式使用 `--sheets all` 或 `--sheet 名称`；核对报告中的实际范围、格式、主键与对齐方式，再结合项目代码解释业务含义。公式只使用保存的缓存结果。临时报告保留 72 小时，由后续临时调用回收；指定保存路径的报告不自动清理。完整参数与各平台缓存目录见 [命令行报告](docs/USAGE.md#命令行报告)。
+
+审查工作区、暂存区或提交/分支改动时，先读取 [Git 范围与快照规则](skills/gridiff/references/git.md)，明确基线并准备原始字节快照，再逐份比较；最终列明成功、失败和跳过的文件。
 
 ## 配合 Fork 使用
 
@@ -118,6 +128,7 @@ macOS ARM64 的 Fork CSV / XLSX 对比已验证；其余平台完成交叉构建
 | [安装说明](docs/INSTALL.md) | 三种安装路线、Fork 配置、快捷键与常见问题 |
 | [离线图文指南](安装与使用.html) | 下载后本地打开，按系统与工具逐步操作 |
 | [使用与配置](docs/USAGE.md) | 主键、表头、Mova 规则、XLSX 语义、筛选分页与限制 |
+| [Agent 技能](skills/gridiff/SKILL.md) | Agent 调用流程，以及 Git 快照和 JSON 报告的解读入口 |
 | [插件说明](README.extension.md) | VS Code / Cursor 专用使用说明，也是 VSIX 的 README 来源 |
 | [开发与发布](DEVELOPMENT.md) | 构建、测试、团队仓库同步与发布流程 |
 | [性能记录](PERFORMANCE.md) | 测量方法、环境和优化结果 |
