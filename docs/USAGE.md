@@ -21,6 +21,7 @@
 ## 命令行报告
 
 ```sh
+gridiff --temp-output "old.xlsx" "new.xlsx"
 gridiff --output "report.json" "old.xlsx" "new.xlsx"
 gridiff --output "report.json" --format mova --key id "old.csv" "new.csv"
 gridiff --output "report.json" --format custom --header-row 3 --data-start-row 5 --description-row 4 --key id "old.csv" "new.csv"
@@ -28,7 +29,15 @@ gridiff --output "report.json" --format custom --header-row 3 --data-start-row 5
 
 `--output` 将完整 JSON 报告写入指定文件，随后退出，不启动服务或浏览器；与 `--wait` 不能同用。目标目录须已存在；报告不能覆盖输入表格，写入成功后才替换目标文件。报告包含源路径及单元格数据，由调用者决定保存位置和清理时机。
 
-| 比较参数（需与 `--output` 同用） | 含义 |
+日常分析使用 `--temp-output`，由 CLI 自动生成 `gridiff/reports/report-<随机值>/report.json` 并打印完整路径；Agent 无需指定缓存地址。它与 `--output`、`--wait` 互斥，使用相同的比较参数和报告格式。即使比较失败，只要诊断报告写入成功，也会返回路径并保持非零退出码。
+
+缓存根目录通过 Go 的 `os.UserCacheDir()` 取得：macOS 为 `~/Library/Caches`；Linux 优先 `$XDG_CACHE_HOME`，否则为 `~/.cache`；Windows 为 `%LocalAppData%`。不使用单次命令的 `TMPDIR`。位置无法确定时明确报错。
+
+临时报告从生成时保留 72 小时，后续 `--temp-output` 调用按归属标记清理过期目录，包含异常中断遗留；不保证到点立即删除。清理跳过符号链接、无效标记及包含未知文件的目录。回收失败不会阻断新比较。显式 `--output` 不自动清理；若在已托管目录内显式保存，该目录会退出托管。
+
+缓存清理、路径分配与退出托管共用跨平台文件锁，避免并发回收刚留档的报告；比较计算在锁外执行。
+
+| 比较参数（需与 `--output` 或 `--temp-output` 同用） | 含义 |
 | --- | --- |
 | `--format` | `auto`（默认）、`csv`、`mova`、`mova-vertical`、`headerless` 或 `custom` |
 | `--key 字段名` | 可重复组成组合主键；不指定时沿用自动选择 |

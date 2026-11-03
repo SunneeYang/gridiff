@@ -1,11 +1,13 @@
 'use strict';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const Zip = require('jszip');
 const { workbook } = require('./xlsx-fixtures');
+const managedDirectories = [];
 
 async function main() {
   assert.ok(process.env.CODEX_AGENT_TMP, 'Run with agent-tmp-run so installed fixtures and reports are removed.');
@@ -41,10 +43,19 @@ async function main() {
     invoke(['--output', output, ...extra, before, after], status);
     return JSON.parse(fs.readFileSync(output, 'utf8'));
   };
+  const compareTemporary = (before, after, status = 0) => {
+    const output = invoke(['--temp-output', before, after], status).stdout.trim();
+    const cache = process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Caches') : process.platform === 'win32' ? process.env.LocalAppData : process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache');
+    assert.equal(path.dirname(path.dirname(output)), path.join(cache, 'gridiff', 'reports'));
+    assert.equal(path.basename(output), 'report.json');
+    assert.match(path.basename(path.dirname(output)), /^report-/);
+    managedDirectories.push(path.dirname(output));
+    return JSON.parse(fs.readFileSync(output, 'utf8'));
+  };
   let before = path.join(temporary, 'old.csv'), after = path.join(temporary, 'new.csv');
   fs.writeFileSync(before, 'id,value\n' + Array.from({ length: 20000 }, (_, i) => `${String(i).padStart(6, '0')},old`).join('\n'));
   fs.writeFileSync(after, 'id,value\n' + Array.from({ length: 20000 }, (_, i) => `${String(i).padStart(6, '0')},new`).join('\n'));
-  let report = compare(before, after);
+  let report = compareTemporary(before, after);
   assert.equal(report.complete, true);
   assert.equal(report.counts.modified, 20000);
   assert.equal(report.sheets[0].result.rows.length, 20000);
@@ -76,11 +87,14 @@ async function main() {
   assert.equal(report.complete, false);
   assert.ok(report.error.length > 0);
   assert.equal(report.counts, undefined);
+  assert.equal(compareTemporary(before, after, 1).complete, false);
   const original = fs.readFileSync(before);
   invoke(['--output', before, before, after], 1);
   assert.deepEqual(fs.readFileSync(before), original);
   assert.equal(fs.existsSync(runtime), false, 'file reports must not start a browser service');
-  console.log('Installed skill passed: manifest hashes, bundled runtime-free CLI, 20000 changes, first/all sheets, formula caches, unchanged/error reports, input protection and no service.');
+  console.log('Installed skill passed: native managed cache paths, 20000 changes read after process exit, persistent reports, first/all sheets, formula caches, failure report paths, input protection and no service.');
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1; });
+main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {
+  for (const directory of managedDirectories) fs.rmSync(directory, { recursive: true, force: true });
+});

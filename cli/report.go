@@ -45,7 +45,7 @@ func writeComparisonReport(files []string, selection sheetSelection, options tab
 		}
 	}
 	report := comparisonReport{SchemaVersion: 1, Version: version, Sources: files, SheetSelection: selection, Options: options, Sheets: []reportSheet{}}
-	data, failure := makeSnapshot(files, selection)
+	data, failure := loadSnapshot(files, selection, false)
 	if failure == nil && data.Error != "" {
 		failure = errors.New(data.Error)
 	}

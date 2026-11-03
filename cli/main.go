@@ -124,6 +124,10 @@ func readSnapshot(file string) ([]byte, error) {
 }
 
 func makeSnapshot(files []string, selection sheetSelection) (*snapshot, error) {
+	return loadSnapshot(files, selection, true)
+}
+
+func loadSnapshot(files []string, selection sheetSelection, prepareDefault bool) (*snapshot, error) {
 	started := time.Now()
 	selection, err := selection.normalized()
 	if err != nil {
@@ -229,7 +233,7 @@ func makeSnapshot(files []string, selection sheetSelection) (*snapshot, error) {
 		result.native.books = [2][]rawSheet{}
 		result.native.csv = [2][][]string{}
 	}
-	if result.Error == "" {
+	if prepareDefault && result.Error == "" {
 		start := time.Now()
 		_, _ = result.native.payload(result, 0, "load", "", nil, nativeSettings{Options: defaultTableOptions(), SheetOptions: [][2]any{}}, viewState{View: "grid", OnlyChanges: true, OnlyFields: true})
 		record("server.compare", start, 0)
@@ -632,6 +636,7 @@ func run(args []string) error {
 
 用法：gridiff [--no-open] [--wait] <旧文件> <新文件>
       gridiff --output <报告.json> [比较参数] <旧文件> <新文件>
+      gridiff --temp-output [比较参数] <旧文件> <新文件>
 
 第一文件为旧版本，第二文件为新版本；以旧为基准查看新文件的变化，不根据路径或内容猜方向。
 Fork 外部 Diff：选择 gridiff，Arguments 设置为 $REMOTE $LOCAL。
@@ -639,12 +644,13 @@ Fork 外部 Diff：选择 gridiff，Arguments 设置为 $REMOTE $LOCAL。
 支持 CSV 和 XLSX，只读比较；默认在浏览器展示。
 
   --output 文件      将完整 JSON 比较报告写入文件，不启动服务或浏览器
+  --temp-output      自动写入用户缓存目录，打印报告路径；与 --output 互斥
   --no-open          仅打印比较地址，不打开浏览器
-  --wait             独立打开，等待结束比较或超时后退出；不能与 --output 同用
+  --wait             独立打开，等待结束比较或超时后退出；不能与报告输出同用
   --sheets first|all XLSX 读取首表（默认）或全部工作表
   --sheet 名称       指定工作表，可重复；不能与 --sheets 同用
 
-比较参数（需与 --output 同用）：
+比较参数（需与 --output 或 --temp-output 同用）：
   --format auto|csv|mova|mova-vertical|headerless|custom  表头格式，默认 auto
   --key 字段名       主键字段，可重复组成组合主键；默认自动选择
   --alignment key|position  按主键（默认）或行号对齐
@@ -658,6 +664,7 @@ Fork 外部 Diff：选择 gridiff，Arguments 设置为 $REMOTE $LOCAL。
 
 记录编号从 1 开始，引号内换行不另计；公式只比较保存的结果，不重算。
 报告包含所选范围的全部记录和字段，complete 表示比较是否完整，失败返回非零退出码。
+临时报告保留 72 小时，后续 --temp-output 调用回收过期项；--output 指定文件不自动清理。
 网页模式的数据保存在内存，不生成数据临时文件；默认复用服务和页签。
 网页模式未打开页面时 2 分钟退出，失去心跳后 10 分钟退出。
 `, version)
@@ -685,6 +692,7 @@ Fork 外部 Diff：选择 gridiff，Arguments 设置为 $REMOTE $LOCAL。
 	}
 	var files []string
 	output := ""
+	tempOutput := false
 	options := defaultTableOptions()
 	options["headerRow"], options["dataStartRow"], options["descriptionRow"] = 1, 2, 0
 	customOptions := false
@@ -695,6 +703,12 @@ Fork 外部 Diff：选择 gridiff，Arguments 设置为 $REMOTE $LOCAL。
 		arg := args[i]
 		if !literal {
 			switch arg {
+			case "--temp-output":
+				if tempOutput {
+					return errors.New("--temp-output 不能重复")
+				}
+				tempOutput = true
+				continue
 			case "--format", "--key", "--alignment", "--header-row", "--data-start-row", "--description-row":
 				if i+1 == len(args) {
 					return fmt.Errorf("选项 %s 缺少值", arg)
@@ -785,18 +799,34 @@ Fork 外部 Diff：选择 gridiff，Arguments 设置为 $REMOTE $LOCAL。
 	if err != nil {
 		return err
 	}
-	if customOptions && output == "" {
-		return errors.New("命令行表头与主键设置需要同时指定 --output")
+	if tempOutput && output != "" {
+		return errors.New("--temp-output 不能与 --output 同用")
 	}
-	if output != "" {
+	if customOptions && output == "" && !tempOutput {
+		return errors.New("命令行表头与主键设置需要同时指定 --output 或 --temp-output")
+	}
+	if output != "" || tempOutput {
 		if wait {
-			return errors.New("--output 不能与 --wait 同用")
+			return errors.New("报告输出不能与 --wait 同用")
 		}
-		if err := writeComparisonReport(files, selection, options, output); err != nil {
+		if tempOutput {
+			cache, err := os.UserCacheDir()
+			if err != nil {
+				return err
+			}
+			output, err = newTemporaryReport(cache)
+			if err != nil {
+				return err
+			}
+		} else if err := preserveTemporaryReport(output); err != nil {
 			return err
 		}
-		fmt.Println(output)
-		return nil
+		failure := writeComparisonReport(files, selection, options, output)
+		_, statErr := os.Stat(output)
+		if failure == nil || tempOutput && statErr == nil {
+			fmt.Println(output)
+		}
+		return failure
 	}
 	var address string
 	var s *comparisonServer

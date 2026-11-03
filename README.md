@@ -58,11 +58,12 @@ Gridiff 也提供通用 [Agent 技能](skills/gridiff/SKILL.md)，用于读取�
 CLI 可以直接把完整结果写入文件，供 agent 或脚本读取：
 
 ```sh
+gridiff --temp-output "旧版本.xlsx" "新版本.xlsx"
 gridiff --output "差异报告.json" "旧版本.xlsx" "新版本.xlsx"
 gridiff --output "差异报告.json" --key id --key profession "旧版本.csv" "新版本.csv"
 ```
 
-报告包含所选范围内的全部记录、字段和旧新值，不受网页分页限制。XLSX 默认首表，也可使用 `--sheets all` 或 `--sheet 名称`。格式、主键、自定义表头及失败状态见 [报告与命令行参数](docs/USAGE.md#命令行报告)。
+技能默认使用 `--temp-output`：CLI 自动选择平台用户缓存目录、打印报告路径，保留 72 小时并在后续临时调用时回收；需要留档时使用 `--output` 指定文件。报告包含所选范围内的全部记录、字段和旧新值，不受网页分页限制。XLSX 默认首表，也可使用 `--sheets all` 或 `--sheet 名称`。格式、主键、自定义表头及失败状态见 [报告与命令行参数](docs/USAGE.md#命令行报告)。
 
 ## 配合 Fork 使用
 

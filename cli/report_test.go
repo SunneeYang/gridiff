@@ -10,6 +10,78 @@ import (
 	"testing"
 )
 
+func runWithReportPath(t *testing.T, args []string) (string, error) {
+	t.Helper()
+	capturePath := filepath.Join(t.TempDir(), "stdout")
+	capture, err := os.Create(capturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := os.Stdout
+	os.Stdout = capture
+	defer func() { os.Stdout = previous }()
+	failure := run(args)
+	if err := capture.Close(); err != nil {
+		t.Fatal(err)
+	}
+	output, err := os.ReadFile(capturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(output)), failure
+}
+
+func TestCLITemporaryReportUsesNativeCacheAndSurvivesCommand(t *testing.T) {
+	files := fixture(t, []byte("id,value\n1,old"), []byte("id,value\n1,new"), "csv")
+	root, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var previous string
+	for i := 0; i < 2; i++ {
+		output, err := runWithReportPath(t, append([]string{"--temp-output", "--key", "id"}, files...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if filepath.Dir(filepath.Dir(output)) != filepath.Join(root, "gridiff", "reports") || filepath.Base(output) != "report.json" || !strings.HasPrefix(filepath.Base(filepath.Dir(output)), "report-") || output == previous {
+			t.Fatalf("report path must be unique and in the native user cache: %q", output)
+		}
+		t.Cleanup(func() { os.RemoveAll(filepath.Dir(output)) })
+		data, err := os.ReadFile(output)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var report struct {
+			Complete bool
+			Counts   map[string]int
+		}
+		if err := json.Unmarshal(data, &report); err != nil || !report.Complete || report.Counts["modified"] != 1 {
+			t.Fatalf("temporary report is not readable after command exit: %s (%v)", data, err)
+		}
+		previous = output
+	}
+}
+
+func TestCLITemporaryReportFailureStillReturnsReadablePath(t *testing.T) {
+	files := fixture(t, []byte("id,value\n1,a\n1,b"), []byte("id,value\n1,c"), "csv")
+	output, err := runWithReportPath(t, append([]string{"--temp-output"}, files...))
+	if err == nil || filepath.Base(output) != "report.json" {
+		t.Fatalf("failure must return its report path and a nonzero result: %q, %v", output, err)
+	}
+	t.Cleanup(func() { os.RemoveAll(filepath.Dir(output)) })
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report struct {
+		Complete bool
+		Error    string
+	}
+	if err := json.Unmarshal(data, &report); err != nil || report.Complete || report.Error == "" {
+		t.Fatalf("diagnostic report is missing: %s (%v)", data, err)
+	}
+}
+
 func TestCLIReportContainsEveryRecordAndOldNewValue(t *testing.T) {
 	var before, after strings.Builder
 	before.WriteString("id,value\n")
@@ -194,6 +266,9 @@ func TestCLIReportValidatesOptionsAndCanAlignByPosition(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "report.json")
 	for _, args := range [][]string{
 		{"--output"},
+		{"--temp-output", "--output", output},
+		{"--temp-output", "--wait"},
+		{"--temp-output", "--temp-output"},
 		{"--output", output, "--wait"},
 		{"--output", output, "--format", "unknown"},
 		{"--output", output, "--header-row", "zero"},
