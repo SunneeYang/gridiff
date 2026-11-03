@@ -13,6 +13,8 @@ node_modules/**/*.map
 node_modules/**/*.ts
 test/**
 scripts/**
+skills/**
+GLOSSARY.md
 cli/**
 launchers/**
 docs/**

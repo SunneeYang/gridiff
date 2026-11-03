@@ -51,6 +51,19 @@ Gridiff 按主键对齐记录、按字段名对齐列，让你直接看到“哪
 
 独立程序的源码构建与团队仓库分发见 [开发文档](DEVELOPMENT.md#独立程序)。源码仓库不直接携带可执行程序。
 
+## 给 Agent 使用
+
+Gridiff 也提供通用 [Agent 技能](skills/gridiff/SKILL.md)，用于读取配置表差异、审查工作区或分支中的 CSV/XLSX 改动。技能包包含对应平台的 CLI，解压后将其中的 `gridiff/` 放入所用 agent 的技能目录即可，无需另装 Gridiff 或配置 PATH。技能源码本身不含可执行程序；维护者可按 [开发说明](DEVELOPMENT.md#agent-技能包) 生成完整安装包。
+
+CLI 可以直接把完整结果写入文件，供 agent 或脚本读取：
+
+```sh
+gridiff --output "差异报告.json" "旧版本.xlsx" "新版本.xlsx"
+gridiff --output "差异报告.json" --key id --key profession "旧版本.csv" "新版本.csv"
+```
+
+报告包含所选范围内的全部记录、字段和旧新值，不受网页分页限制。XLSX 默认首表，也可使用 `--sheets all` 或 `--sheet 名称`。格式、主键、自定义表头及失败状态见 [报告与命令行参数](docs/USAGE.md#命令行报告)。
+
 ## 配合 Fork 使用
 
 在 Fork 的 **Settings / Preferences → Integration → External Diff Tool** 中配置一次。Fork 支持 macOS 和 Windows；Linux 可从终端或编辑器独立使用 Gridiff。

@@ -21,6 +21,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -627,7 +628,39 @@ func run(args []string) error {
 		return nil
 	}
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "-h")) || (len(args) == 2 && args[0] == "diff" && (args[1] == "--help" || args[1] == "-h")) {
-		fmt.Printf("Gridiff %s — 本地浏览器表格对比\n\n用法：gridiff [--no-open] [--wait] <旧文件> <新文件>\n\n第一文件为旧版本，第二文件为新版本；以旧为基准查看新文件的变化，不根据路径或内容猜方向。\nFork 外部 Diff：选择 gridiff，Arguments 设置为 $REMOTE $LOCAL。\n兼容旧用法：gridiff diff <旧文件> <新文件>。\n支持 CSV 和 XLSX，只读比较，自动打开默认浏览器。\n数据保存在内存，不生成 HTML 或数据临时文件。\n\n  --no-open   仅打印地址，不打开浏览器\n  --wait      独立打开，等待结束比较或超时后退出\n  --sheets first|all  XLSX 读取首表（默认）或全部工作表\n  --sheet 名称        指定工作表，可重复；不能与 --sheets 同用\n  --version   显示版本\n  --licenses  显示许可声明\n  --help      显示帮助\n\n默认复用服务和页签，新比较替换当前内容；完成文件快照后返回。\n未打开页面时 2 分钟退出，失去心跳后 10 分钟退出。\n", version)
+		fmt.Printf(`Gridiff %s — 本地表格对比
+
+用法：gridiff [--no-open] [--wait] <旧文件> <新文件>
+      gridiff --output <报告.json> [比较参数] <旧文件> <新文件>
+
+第一文件为旧版本，第二文件为新版本；以旧为基准查看新文件的变化，不根据路径或内容猜方向。
+Fork 外部 Diff：选择 gridiff，Arguments 设置为 $REMOTE $LOCAL。
+兼容旧用法：gridiff diff <旧文件> <新文件>。
+支持 CSV 和 XLSX，只读比较；默认在浏览器展示。
+
+  --output 文件      将完整 JSON 比较报告写入文件，不启动服务或浏览器
+  --no-open          仅打印比较地址，不打开浏览器
+  --wait             独立打开，等待结束比较或超时后退出；不能与 --output 同用
+  --sheets first|all XLSX 读取首表（默认）或全部工作表
+  --sheet 名称       指定工作表，可重复；不能与 --sheets 同用
+
+比较参数（需与 --output 同用）：
+  --format auto|csv|mova|mova-vertical|headerless|custom  表头格式，默认 auto
+  --key 字段名       主键字段，可重复组成组合主键；默认自动选择
+  --alignment key|position  按主键（默认）或行号对齐
+  --header-row 数字         custom 格式字段名所在记录，默认 1
+  --data-start-row 数字     custom 格式数据起始记录，默认 2
+  --description-row 数字    custom 格式说明所在记录，默认 0（没有说明）
+
+  --version          显示版本
+  --licenses         显示许可声明
+  --help             显示帮助
+
+记录编号从 1 开始，引号内换行不另计；公式只比较保存的结果，不重算。
+报告包含所选范围的全部记录和字段，complete 表示比较是否完整，失败返回非零退出码。
+网页模式的数据保存在内存，不生成数据临时文件；默认复用服务和页签。
+网页模式未打开页面时 2 分钟退出，失去心跳后 10 分钟退出。
+`, version)
 		return nil
 	}
 	if len(args) == 1 && args[0] == "--version" {
@@ -651,6 +684,10 @@ func run(args []string) error {
 		args = args[1:]
 	}
 	var files []string
+	output := ""
+	options := defaultTableOptions()
+	options["headerRow"], options["dataStartRow"], options["descriptionRow"] = 1, 2, 0
+	customOptions := false
 	noOpen, wait, literal := false, false, false
 	selection := sheetSelection{}
 	modeSet := false
@@ -658,6 +695,34 @@ func run(args []string) error {
 		arg := args[i]
 		if !literal {
 			switch arg {
+			case "--format", "--key", "--alignment", "--header-row", "--data-start-row", "--description-row":
+				if i+1 == len(args) {
+					return fmt.Errorf("选项 %s 缺少值", arg)
+				}
+				i++
+				value := args[i]
+				customOptions = true
+				switch arg {
+				case "--format", "--alignment":
+					options[strings.TrimPrefix(arg, "--")] = value
+				case "--key":
+					options["keyColumns"] = append(options["keyColumns"].([]string), value)
+				default:
+					number, err := strconv.Atoi(value)
+					if err != nil {
+						return fmt.Errorf("选项 %s 必须为整数", arg)
+					}
+					key := map[string]string{"--header-row": "headerRow", "--data-start-row": "dataStartRow", "--description-row": "descriptionRow"}[arg]
+					options[key] = number
+				}
+				continue
+			case "--output":
+				if i+1 == len(args) || args[i+1] == "" || output != "" {
+					return errors.New("--output 需要一个报告文件路径，不能重复")
+				}
+				i++
+				output = args[i]
+				continue
 			case "--sheets", "--sheet":
 				if i+1 == len(args) {
 					return fmt.Errorf("选项 %s 缺少值", arg)
@@ -712,9 +777,29 @@ func run(args []string) error {
 	if selectionErr != nil {
 		return selectionErr
 	}
+	rawOptions, err := json.Marshal(options)
+	if err != nil {
+		return err
+	}
+	options, err = normalizeOptions(rawOptions)
+	if err != nil {
+		return err
+	}
+	if customOptions && output == "" {
+		return errors.New("命令行表头与主键设置需要同时指定 --output")
+	}
+	if output != "" {
+		if wait {
+			return errors.New("--output 不能与 --wait 同用")
+		}
+		if err := writeComparisonReport(files, selection, options, output); err != nil {
+			return err
+		}
+		fmt.Println(output)
+		return nil
+	}
 	var address string
 	var s *comparisonServer
-	var err error
 	shouldOpen := !noOpen
 	if wait {
 		s, err = startServer(serverOptions{Files: files, SheetSelection: selection})

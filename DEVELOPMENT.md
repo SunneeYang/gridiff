@@ -50,6 +50,19 @@ npm run build:cli -- --all
 
 构建随程序内嵌 Go 标准库、实际链接的 Go 模块及 SSF General 算法的许可证，并在下载包提供 `LICENSES.txt`。`gridiff --licenses` 可查看声明。VSIX 排除 Go 目录、浏览器桥接和主题资源，继续携带插件自身的 JS 依赖及许可。
 
+### Agent 技能包
+
+```sh
+npm run build:skill
+npm run build:skill -- --all
+```
+
+默认构建当前系统，也可使用与 `build:cli` 相同的 `--target`。脚本复用 CLI 构建器，然后生成 `dist/skills/gridiff-<平台>-<架构>/gridiff/` 与同名 ZIP。每包携带 `skills/gridiff/` 的说明和引用、`bin/gridiff`（Windows 为 `bin/gridiff.exe`）、二进制构建记录、许可证及技能文件哈希清单；安装时使用完整包，单独复制源码中的技能说明无法获得 CLI。
+
+`--output` 的报告使用独立 `schemaVersion`，复用 Go 完整比较模型，不使用网页投影。新增报告参数通过现有设置校验，失败报告明确标记不完整。技能通过 CLI 准备和读取比较结果，Git 基线与快照由 agent 按技能说明处理。VSIX 排除 `skills/`、术语和设计文档，插件继续独立运行。
+
+`npm test` 覆盖打包校验；`npm run test:skill` 从当前平台 ZIP 解包并实际运行包内 CLI，验证无额外运行时、完整报告、XLSX 范围、失败诊断及输入保护。Go 的 `TestCLIReport*` 覆盖命令入口、参数与报告契约。
+
 ### 随 design 仓库分发
 
 运行 `npm run build:cli -- --all` 后，用 `npm run sync:project -- --project /path/to/design` 预览，再加 `--apply` 写入。脚本校验五个平台的版本、构建来源、大小、SHA-256 与许可证，并要求 Go 源码及内嵌资源的构建输入摘要一致，避免混入旧包。在 `design/gridiff/` 内生成统一入口、平台程序、使用说明和清单；目录内的 `.gitattributes` 将程序交给 Git LFS 管理。它保留不受管理的文件，遇到受管理文件被手工改动会停止，不执行 Git 暂存、提交或推送。
