@@ -59,6 +59,8 @@ npm run build:skill -- --all
 
 默认构建当前系统，也可使用与 `build:cli` 相同的 `--target`。脚本复用 CLI 构建器，然后生成 `dist/skills/gridiff-<平台>-<架构>/gridiff/` 与同名 ZIP。每包携带 `skills/gridiff/` 的说明和引用、`bin/gridiff`（Windows 为 `bin/gridiff.exe`）、二进制构建记录、许可证及技能文件哈希清单；安装时使用完整包，单独复制源码中的技能说明无法获得 CLI。
 
+技能独立从 Gridiff 的 GitHub 仓库分发，不通过 `sync:project` 写入 Design 等业务仓库。远程安装步骤见 [Agent 安装说明](docs/AGENT-INSTALL.md)。发布完整技能 ZIP 时使用独立的技能 Release，并保留包内真实构建来源；仅推送 `skills/gridiff/` 源码不等于发布可直接运行的技能包。发布标签和上传制品按当次授权执行，不自动发布插件市场。
+
 `--output` 的报告使用独立 `schemaVersion`，复用 Go 完整比较模型，不使用网页投影。新增报告参数通过现有设置校验，失败报告明确标记不完整。技能通过 CLI 准备和读取比较结果，Git 基线与快照由 agent 按技能说明处理。VSIX 排除 `skills/`、术语和设计文档，插件继续独立运行。
 
 `npm test` 覆盖打包校验；`npm run test:skill` 从当前平台 ZIP 解包并实际运行包内 CLI，验证无额外运行时、完整报告、XLSX 范围、失败诊断及输入保护。Go 的 `TestCLIReport*` 覆盖命令入口、参数与报告契约。

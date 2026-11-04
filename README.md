@@ -57,6 +57,8 @@ Gridiff 按主键对齐记录、按字段名对齐列，让你直接看到“哪
 
 Agent 比较 CSV/XLSX，或审查包含这些文件的配置改动时，按 [Gridiff 技能说明](skills/gridiff/SKILL.md) 准备输入和解读结果；已安装时优先读取安装目录内的 `SKILL.md`，以该目录定位程序。技能包包含对应平台的 CLI，解压后将其中的 `gridiff/` 放入所用 agent 的技能目录即可；只有源码时，按 [开发说明](DEVELOPMENT.md#agent-技能包) 生成完整包。
 
+从 GitHub 安装时，读取 [Agent 安装说明](docs/AGENT-INSTALL.md)，选择对应平台的完整技能包；技能独立于 Design 等业务仓库。当前 Codex、Cursor 可共享 `~/.agents/skills/gridiff/` 的一份安装。不要只通过 GitHub 技能安装器复制 `skills/gridiff/` 源码目录，其中没有 CLI。
+
 1. **定位程序并确认方向**。从已安装技能目录调用 `bin/gridiff`，Windows 使用 `bin/gridiff.exe`，无需配置 PATH；先用包内程序的 `--help` 确认参数。旧版本在前，新版本在后。
 2. **生成报告**。日常分析用 `--temp-output`，CLI 自动选择平台用户缓存目录并返回一行实际文件路径。用户要求留档时改用 `--output <文件>`，两种输出模式互斥。
 3. **读取文件后得出结论**。CLI 退出后，用文件读取工具打开返回的路径；终端输出仅是文件路径，实际差异在 JSON 文件内。先看统计，再读取记录、字段和旧新值，同时核查值、字段结构及顺序变化。完整报告包含未变化记录，大文件只读了一部分时，结论也仅覆盖已核查部分。
