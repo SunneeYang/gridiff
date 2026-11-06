@@ -27,6 +27,12 @@ async function comparison(url, metadata) {
   const close = url => fetch(url + 'close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
   const browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'chrome' });
   const page = await browser.newPage();
+  const readNotice = async () => {
+    await page.locator('#settings > summary').click();
+    const text = await page.locator('#notice').innerText();
+    await page.keyboard.press('Escape');
+    return text;
+  };
   try {
     let url;
     const submit = async args => {
@@ -47,13 +53,13 @@ async function comparison(url, metadata) {
     assert.equal(await page.evaluate(() => window.gridiffPerf.result.native), true);
     assert.deepEqual(await names(), ['Renamed']);
     await page.locator('tbody tr.modified').waitFor();
-    assert.match(await page.locator('#notice').innerText(), /首个工作表/);
+    assert.match(await readNotice(), /首个工作表/);
     snapshot = await submit(['--sheets', 'all']);
     assert.equal(snapshot.sheetSelection.mode, 'all');
     assert.deepEqual(await names(), ['Renamed', '中文, table', 'Added', 'First', 'Gone']);
     await page.locator('#sheet').selectOption('中文, table');
     await page.waitForFunction(() => document.querySelector('#content').textContent.includes('after'));
-    assert.match(await page.locator('#notice').innerText(), /全部工作表/);
+    assert.match(await readNotice(), /全部工作表/);
     snapshot = await submit(['--sheet', '中文, table', '--sheet', 'Added']);
     assert.deepEqual(snapshot.sheetSelection, { mode: 'named', names: ['中文, table', 'Added'] });
     assert.deepEqual(await names(), ['中文, table', 'Added']);
@@ -96,7 +102,7 @@ async function comparison(url, metadata) {
     const failed = await (await fetch(check + 'snapshot')).json();
     assert.match(failed.error, /XLSX/);
     await page.waitForFunction(generation => window.gridiffPerf?.result?.generation === generation, failed.generation);
-    assert.match(await page.locator('#notice').innerText(), /全部工作表/);
+    assert.match(await readNotice(), /全部工作表/);
     console.log('Sheet selection passed: defaults, all/named CLI startup and reuse, first/name pairing, hidden payload exclusion, swap/reload, misses, malformed arguments and selected XML validation.');
   } finally { for (const url of urls) await close(url); await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
