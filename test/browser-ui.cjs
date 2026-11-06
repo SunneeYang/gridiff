@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { chromium } = require('playwright');
 const { startComparisonServer } = require('./browser-server.cjs');
+const { reviewInteractions, reviewPagination } = require('./review-interactions.cjs');
 const { workbook } = require('./xlsx-fixtures');
 
 (async () => {
@@ -20,6 +21,12 @@ const { workbook } = require('./xlsx-fixtures');
   const errors = [];
   try {
     const context = await browser.newContext({ viewport: { width: 1360, height: 1000 } });
+    let preferences = { mode: 'system', palette: 'default', style: 'material', layout: 'matrix' };
+    await context.route('**/preferences', async route => {
+      if (route.request().method() === 'POST') preferences = route.request().postDataJSON();
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(preferences) });
+    });
+    const openSettings = async () => { if (!await page.locator('#settings').evaluate(node => node.open)) await page.locator('#settings > summary').click(); };
     const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
     const csv = await start('csv', [
       'group,key,value\ng,a,old\ng,b,same\nx,c,removed\n',
@@ -30,6 +37,7 @@ const { workbook } = require('./xlsx-fixtures');
     await page.locator('#error:not([hidden])').waitFor();
     assert.match(await page.locator('#error').innerText(), /重复/);
     assert.equal(await page.locator('[data-action=native]').isVisible(), false);
+    await openSettings();
     await page.locator('#keys').click();
     await page.getByLabel('对齐方式', { exact: true }).selectOption('key');
     await page.getByRole('checkbox', { name: 'group', exact: true }).check();
@@ -41,6 +49,7 @@ const { workbook } = require('./xlsx-fixtures');
     assert.ok((await page.locator('#content').innerText()).includes('<img src=x onerror=alert(1)>'));
     assert.equal(await page.locator('#content img').count(), 0);
     assert.ok((await page.locator('#notice').innerText()).includes('内存中的只读快照'));
+    await openSettings();
     await page.locator('#format').click();
     await page.getByLabel('格式', { exact: true }).selectOption('custom');
     await page.getByLabel('字段名所在记录', { exact: true }).fill('1');
@@ -61,6 +70,7 @@ const { workbook } = require('./xlsx-fixtures');
     assert.ok((await page.locator('tr.modified .after').innerText()).includes('old'));
     await page.setViewportSize({ width: 375, height: 900 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await openSettings();
     await page.locator('#keys').click();
     await page.getByLabel('对齐方式', { exact: true }).selectOption('position');
     await page.getByRole('button', { name: '应用', exact: true }).click();
@@ -73,6 +83,8 @@ const { workbook } = require('./xlsx-fixtures');
     await csv.closed;
     assert.equal(await page.locator('#content').innerText(), '');
     assert.equal(await page.locator('#sources').innerText(), '');
+    assert.equal(await page.locator('#source-details').textContent(), '');
+    assert.equal(await page.locator('#field-filter option').count(), 0);
     assert.equal(await page.locator('button:enabled, input:enabled, select:enabled').count(), 0);
 
     const xlsx = await start('xlsx', [
@@ -94,12 +106,13 @@ const { workbook } = require('./xlsx-fixtures');
     const vertical = await start('csv', ['all,int32,None,无,0\nall,int32,All,所有,1', 'all,int32,None,无,0\ngo,int32,All,所有,2']);
     await page.goto(vertical.url);
     await page.waitForFunction(() => document.querySelector('#format').textContent.includes('Mova 竖表'));
+    await openSettings();
     await page.locator('#format').click();
     await page.getByLabel('格式', { exact: true }).selectOption('mova-vertical');
     await page.getByRole('button', { name: '应用', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('#format').textContent === '格式：Mova 竖表' && !document.querySelector('#format').disabled);
     assert.equal(await page.locator('#error').isVisible(), false);
-    assert.ok((await page.locator('#keys').innerText()).includes('name'));
+    assert.ok((await page.locator('#keys').textContent()).includes('name'));
     await page.getByRole('button', { name: '结束比较', exact: true }).click();
     await vertical.closed;
 
@@ -122,8 +135,15 @@ const { workbook } = require('./xlsx-fixtures');
     await page.locator('tr.modified').waitFor();
     await expired.close();
     await page.waitForFunction(() => document.querySelector('#title').textContent === '比较已结束');
-    assert.ok((await page.locator('#notice').innerText()).includes('重新打开比较'));
+    assert.ok((await page.locator('#review-notice').innerText()).includes('重新打开比较'));
     assert.equal(await page.locator('button:enabled').count(), 0);
+    const fixtures = await Promise.all(['before.csv', 'after.csv'].map(name => fs.readFile(path.join(__dirname, 'fixtures', name))));
+    const review = await start('csv', fixtures);
+    await page.goto(review.url); await page.locator('tbody tr').first().waitFor();
+    await reviewInteractions(page); await review.close();
+    const sparse = await start('csv', ['old', 'new'].map(value => 'id,v,rare,other\n' + Array.from({ length: 205 }, (_, i) => `${i},${value},${value === 'new' && i === 204 ? 'only-last' : ''},same`).join('\n')));
+    await page.goto(sparse.url); await page.locator('tbody tr').first().waitFor();
+    await reviewPagination(page); await sparse.close();
     assert.deepEqual(errors, []);
     console.log('Browser UI passed: CSV/XLSX snapshots, compound keys, custom headers, swap, reload, source removal, safe text, responsive layout, session end and expiry.');
   } finally {

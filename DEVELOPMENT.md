@@ -28,7 +28,7 @@ npm run package
 
 VS Code 插件维持 `src/comparison.js`、`src/xlsx-core.js`、ExcelJS 和 SSF 的独立 JS 比较；不调用 Go 或本地 HTTP 服务。插件在页面使用 `media/view.js` 选择视图，独立程序由 Go 选择。`test/native-parity.cjs` 及 Go 差分测试用同样样例比较两条链路的结果，覆盖类型、公式缓存、格式、主键、顺序、搜索和分页。
 
-`media/themes.js` / `themes.css` 只在浏览器入口启用。系统模式监听 `prefers-color-scheme`；手动明暗覆盖系统变化。通过本地 preferences 接口将 `{mode,palette}` 保存为单一配置文件，macOS 位于 `~/Library/Application Support/gridiff/preferences.json`，Linux 使用 XDG 用户配置目录，Windows 使用用户 AppData。默认启动不写配置；手动修改采用临时文件加替换保存，失败会在页面提示。配色是各流行主题色板的表格界面适配，并保持差异语义与文字对比度。
+`media/themes.js` / `themes.css` 只在浏览器入口启用。系统模式监听 `prefers-color-scheme`；手动明暗覆盖系统变化。通过本地 preferences 接口将 `{mode,palette,style,layout}` 保存为单一配置文件，兼容旧版两字段配置和请求。macOS 位于 `~/Library/Application Support/gridiff/preferences.json`，Linux 使用 XDG 用户配置目录，Windows 使用用户 AppData。默认启动不写配置；手动修改采用临时文件加替换保存，失败会在页面提示。组件风格与阅读布局使用共享页面样式，编辑器将其保存在 Webview 状态中；外观不写入原生投影视图、不发起比较请求。配色是各流行主题色板的表格界面适配，并保持差异语义与文字对比度。
 
 构建使用 Node.js 准备静态网页资源，再用 Go 1.26+、`CGO_ENABLED=0` 和 `-trimpath -ldflags '-s -w'` 生成无外部运行时依赖的程序。网页资源先 gzip 再内嵌，支持 gzip 的浏览器直接接收压缩资源。生成的 `cli/assets/*.gz` 已被 Git 忽略，保留供 Go 开发和测试使用。构建不修改版本、不提交、不上传。
 

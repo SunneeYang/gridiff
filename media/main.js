@@ -4,8 +4,17 @@
   const $ = id => document.getElementById(id);
   const saved = host.getState() || {};
   const state = { view: saved.view || 'grid', onlyChanges: saved.onlyChanges !== false, onlyFields: saved.onlyFields !== false,
-    query: saved.query || '', page: 0 };
+    query: saved.query || '', field: saved.field || '', page: 0 };
   let data = null, model = null, revision = -1, pageCount = 1;
+  const root = document.documentElement;
+  const ui = { rows: [], indexes: [], info: null, selected: null, edge: null, reveal: false };
+  const rowID = row => JSON.stringify([row.identity, row.beforeRecord, row.afterRecord, row.unkeyed]);
+  const isFocus = () => root.dataset.layout === 'focus' && state.view === 'list';
+  if (!window.gridiffHost) {
+    if (['github', 'material', 'soft', 'brutalist'].includes(saved.style)) root.dataset.style = saved.style;
+    if (['matrix', 'paper', 'focus', 'terminal'].includes(saved.layout)) root.dataset.layout = saved.layout;
+  }
+  $('theme-style').value = root.dataset.style; $('read-layout').value = root.dataset.layout;
   const statusNames = { added: '+ 新增', removed: '− 删除', modified: '~ 修改', unchanged: '未变化' };
   const formatNames = { auto: '自动', csv: '一行表头', mova: 'Mova 四行表头', 'mova-vertical': 'Mova 竖表', headerless: '无表头', custom: '自定义表头' };
   const typeNames = { empty: '空值', string: '文本', number: '数字', boolean: '布尔值', date: '日期', error: '错误' };
@@ -15,7 +24,7 @@
     if (className) node.className = className;
     return node;
   }
-  function persist() { host.setState({ view: state.view, onlyChanges: state.onlyChanges, onlyFields: state.onlyFields, query: state.query }); }
+  function persist() { host.setState({ view: state.view, onlyChanges: state.onlyChanges, onlyFields: state.onlyFields, query: state.query, field: state.field, style: root.dataset.style, layout: root.dataset.layout }); }
   function marked(value, other) {
     const span = element('span');
     if (value === null) { span.textContent = '不存在'; span.className = 'muted absent'; return span; }
@@ -65,6 +74,7 @@
     if (change) node.append(element('span', change, 'delta'));
     return node;
   }
+  const numericField = field => /^(u?int(?:8|16|32|64)?|float(?:32|64)?|double|number|decimal)$/i.test((field.after || field.before).type || '');
   function fieldTitle(field, side) {
     const meta = (side && field[side]) || field.after || field.before;
     const node = element('div', meta.label, 'field-title');
@@ -91,7 +101,10 @@
     const schema = $('schema'); schema.hidden = !model?.schema.length;
     const body = $('schema-content'); body.replaceChildren();
     if (schema.hidden) return;
-    $('schema-title').textContent = `${model.schema.length} 项字段变化 · 新增 / 删除 / 类型 / 标记 / 顺序`;
+    const kinds = { added: '新增字段', removed: '删除字段', label: '说明', type: '类型', flags: '标记', order: '顺序' };
+    const counts = new Map();
+    for (const item of model.schema) counts.set(item.kind, (counts.get(item.kind) || 0) + 1);
+    $('schema-title').textContent = [...counts].map(([kind, count]) => `${kinds[kind]} ${count}`).join(' · ');
     const labels = { added: '+ 新增字段', removed: '− 删除字段', label: '说明变化', type: '类型变化', flags: '导出标记变化', order: '字段顺序变化' };
     const value = v => v === null ? '不存在' : typeof v === 'object' && !Array.isArray(v) ? `${v.label} · ${v.type || '无类型'} · ${v.flags || '无标记'}` : Array.isArray(v) ? v.join(' → ') : v || '空值';
     for (const item of model.schema) {
@@ -103,9 +116,76 @@
   function renderSummary() {
     const container = $('summary'); container.replaceChildren();
     if (!model) return;
+    container.append(element('span', '当前表全部变化', 'muted'));
     for (const [key, text] of [['modified', '记录修改'], ['added', '记录新增'], ['removed', '记录删除'], ['cells', '值修改'], ['moved', '顺序变化']]) {
       const item = element('div', undefined, 'stat'); item.append(element('strong', String(model.counts[key]), key), element('span', text)); container.append(item);
     }
+  }
+  function renderRecord(row, index) {
+    const article = element('article', undefined, 'change-record'); article.dataset.record = index;
+    article.append(identity(row));
+    const values = element('div', undefined, 'change-fields');
+    const changed = ui.indexes.filter(i => row.cells[i].changed || row.status === 'added' || row.status === 'removed' || !state.onlyFields || state.field);
+    if (!changed.length) values.append(element('p', row.moved ? '字段值未变；共同记录的相对顺序发生变化。' : '字段值未变。', 'muted'));
+    for (const i of changed) {
+      const field = element('div', undefined, 'change-field');
+      field.append(fieldTitle(model.fields[i], row.status === 'removed' ? 'before' : 'after'), pair(row.cells[i], row.status, true)); values.append(field);
+    }
+    article.append(values); return article;
+  }
+  function renderFocus() {
+    const queue = element('nav', undefined, 'record-queue'); queue.setAttribute('aria-label', '本页记录');
+    for (const [index, row] of ui.rows.entries()) {
+      const button = element('button'); button.dataset.record = index;
+      button.setAttribute('aria-pressed', String(rowID(row) === ui.selected)); button.append(identity(row)); queue.append(button);
+    }
+    const detail = element('section', undefined, 'focus-detail'); detail.tabIndex = 0; detail.setAttribute('aria-label', '当前记录详情');
+    const index = ui.rows.findIndex(row => rowID(row) === ui.selected);
+    if (index >= 0) detail.append(renderRecord(ui.rows[index], index));
+    const workspace = element('div', undefined, 'focus-workspace'); workspace.append(queue, detail); $('content').append(workspace);
+  }
+  function updateNavigation() {
+    const index = ui.rows.findIndex(row => rowID(row) === ui.selected), info = ui.info;
+    $('previous-record').disabled = !info || data?.busy || (state.page === 0 && index <= 0);
+    $('next-record').disabled = !info || data?.busy || !ui.rows.length || (state.page + 1 >= pageCount && index === ui.rows.length - 1);
+    $('record-position').textContent = index < 0 ? '尚未定位' : `${state.page * info.pageSize + index + 1} / ${info.filteredRows}`;
+    $('content').querySelectorAll('[data-record]').forEach(node => {
+      const selected = Number(node.dataset.record) === index;
+      if (node.tagName === 'BUTTON') node.setAttribute('aria-pressed', String(selected));
+      else node.classList.toggle('current', selected);
+    });
+  }
+  function revealRecord() {
+    const index = ui.rows.findIndex(row => rowID(row) === ui.selected);
+    if (index < 0) return;
+    const container = $('content').querySelector('.record-queue') || $('content').querySelector('.grid-wrap') || $('content');
+    const row = container.querySelector(`[data-record="${index}"]`);
+    if (!row) return;
+    const viewport = container.getBoundingClientRect(), box = row.getBoundingClientRect();
+    const header = container.querySelector('thead')?.getBoundingClientRect().height || 0;
+    container.scrollTop += Math.min(0, box.top - viewport.top - header) + Math.max(0, Math.min(box.bottom - viewport.bottom, box.top - viewport.top - header));
+    if (container.classList.contains('record-queue')) container.scrollLeft += Math.min(0, box.left - viewport.left) + Math.max(0, box.right - viewport.right);
+  }
+  function selectRecord(index, reveal = true) {
+    const selected = rowID(ui.rows[index]);
+    const detail = $('content').querySelector('.focus-detail');
+    if (detail && selected === ui.selected) return;
+    ui.selected = selected;
+    if (detail) {
+      detail.replaceChildren(renderRecord(ui.rows[index], index)); detail.scrollTop = 0;
+      if (matchMedia('(max-width: 700px)').matches) $('content').scrollTop = 0;
+    }
+    updateNavigation(); if (reveal) revealRecord();
+  }
+  function navigateRecord(step) {
+    const index = ui.rows.findIndex(row => rowID(row) === ui.selected), next = index + step;
+    if (next >= 0 && next < ui.rows.length) { selectRecord(next); return; }
+    const page = state.page + step;
+    if (page >= 0 && page < pageCount) { state.page = page; ui.edge = step > 0 ? 'first' : 'last'; ui.reveal = true; requestRender(); }
+  }
+  function resetFilters() {
+    clearTimeout(searchTimer); state.query = ''; state.field = ''; state.page = 0;
+    $('search').value = ''; $('field-filter').value = ''; requestRender(); $('search').focus({ preventScroll: true });
   }
   function render() {
     const perf = window.gridiffPerf, start = perf ? performance.now() : 0;
@@ -114,26 +194,43 @@
     $('list-tab').setAttribute('aria-pressed', String(state.view === 'list'));
     $('only-changes').checked = state.onlyChanges; $('only-fields').checked = state.onlyFields;
     const container = $('content'); container.replaceChildren(); container.tabIndex = state.view === 'list' ? 0 : -1;
-    if (!model) { $('status').textContent = '只读比较'; $('page').textContent = ''; $('prev').disabled = $('next').disabled = true; return; }
+    ui.rows = []; ui.info = null;
+    if (!model) { updateNavigation(); $('results').textContent = ''; $('status').textContent = '只读比较'; $('page').textContent = ''; $('prev').disabled = $('next').disabled = true; return; }
     const filterStart = perf ? performance.now() : 0;
     const selected = data.pageInfo ? { rows: model.rows, pageInfo: data.pageInfo } : window.gridiffView(model, state);
     const { page, pages, fieldIndexes, totalRows, filteredRows } = selected.pageInfo;
     pageCount = pages;
     const visible = selected.rows; state.page = page;
+    ui.rows = visible; ui.info = selected.pageInfo; ui.indexes = fieldIndexes;
+    if (ui.edge && visible.length) ui.selected = rowID(visible[ui.edge === 'last' ? visible.length - 1 : 0]);
+    ui.edge = null;
+    if (!visible.some(row => rowID(row) === ui.selected)) ui.selected = isFocus() && visible.length ? rowID(visible[0]) : null;
+    $('results').textContent = `显示 ${filteredRows} / ${totalRows} 条记录 · 本页 ${visible.length} 条`;
+    $('filter-note').hidden = $('clear-filters').hidden = !state.query && !state.field;
+    $('only-fields').disabled = !!state.field || !!data.busy;
+    $('field-filter').value = state.field;
     const filteredAt = perf ? performance.now() : 0, columnsAt = filteredAt;
     $('page').textContent = `${state.page + 1} / ${pages}`; $('prev').disabled = !state.page; $('next').disabled = state.page + 1 >= pages;
-    $('status').textContent = `只读 · ${model.alignment === 'position' ? '按行号对齐' : `按 ${model.keys.join(' + ')} 对齐`} · ${filteredRows} / ${totalRows} 条记录 · 本页 ${visible.length} 条`;
-    if (!filteredRows) container.append(element('div', state.query ? '没有匹配的记录。' : '没有变动记录。可取消“仅看变动记录”查看原表；字段变化见上方。', 'empty-state'));
+    $('status').textContent = `只读 · ${model.alignment === 'position' ? '按行号对齐' : `按 ${model.keys.join(' + ')} 对齐`} · ${data.xlsx ? `已载入 ${data.sheets.length} 张表 · 当前 ${data.sheetName}` : '当前表'}`;
+    if (!filteredRows) {
+      const empty = element('div', undefined, 'empty-state');
+      empty.append(element('h2', state.query || state.field ? '没有匹配的记录' : model.schema.length ? '没有记录值变化' : '当前表没有变化'),
+        element('p', model.schema.length ? '字段结构变化仍可在上方展开查看。' : '可调整筛选范围，或显示未变化记录核对原表。'));
+      const reset = element('button', state.query || state.field ? '清除筛选' : '显示全部记录');
+      reset.addEventListener('click', () => { if (!state.query && !state.field) state.onlyChanges = false; resetFilters(); });
+      empty.append(reset); container.append(empty);
+    }
     if (visible.length && state.view === 'grid') {
       const wrap = element('div', undefined, 'grid-wrap'); wrap.tabIndex = 0; wrap.setAttribute('aria-label', '可横向滚动的差异表格');
-      const table = element('table'); const thead = element('thead'), tr = element('tr');
+      const table = element('table'); const caption = element('caption', '旧版本到新版本的原表对照', 'sr-only'); table.append(caption); const thead = element('thead'), tr = element('tr');
       const identityHeader = element('th', '记录', 'sticky'); identityHeader.scope = 'col'; tr.append(identityHeader);
-      for (const i of fieldIndexes) { const th = element('th'); th.scope = 'col'; th.append(fieldTitle(model.fields[i])); tr.append(th); }
+      for (const i of fieldIndexes) { const th = element('th', undefined, numericField(model.fields[i]) ? 'numeric-field' : ''); th.scope = 'col'; th.append(fieldTitle(model.fields[i])); tr.append(th); }
       thead.append(tr); table.append(thead); const tbody = element('tbody');
-      for (const row of visible) {
-        const tr = element('tr', undefined, row.status); const th = element('th', undefined, 'sticky'); th.scope = 'row'; th.append(identity(row)); tr.append(th);
+      for (const [index, row] of visible.entries()) {
+        const tr = element('tr', undefined, row.status); tr.dataset.record = index; const th = element('th', undefined, 'sticky'); th.scope = 'row'; th.append(identity(row)); tr.append(th);
         for (const i of fieldIndexes) {
           const cell = row.cells[i], td = element('td', undefined, cell.changed ? 'changed' : '');
+          if (numericField(model.fields[i])) td.classList.add('numeric-field');
           const value = element('div', undefined, 'cell-value');
           if (cell.changed || row.status === 'added' || row.status === 'removed') value.append(pair(cell, row.status));
           else value.append(element('span', cell.after === '' ? '空值' : cell.after ?? '不存在', cell.after ? 'unchanged-value' : 'muted absent'));
@@ -142,19 +239,10 @@
         tbody.append(tr);
       }
       table.append(tbody); wrap.append(table); container.append(wrap);
-    } else {
-      for (const row of visible) {
-        const article = element('article', undefined, 'change-record'); article.append(identity(row));
-        const values = element('div', undefined, 'change-fields');
-        const changed = fieldIndexes.filter(i => row.cells[i].changed || row.status === 'added' || row.status === 'removed' || !state.onlyFields);
-        if (!changed.length) values.append(element('p', row.moved ? '字段值未变；共同记录的相对顺序发生变化。' : '字段值未变。', 'muted'));
-        for (const i of changed) {
-          const field = element('div', undefined, 'change-field');
-          field.append(fieldTitle(model.fields[i], row.status === 'removed' ? 'before' : 'after'), pair(row.cells[i], row.status, true)); values.append(field);
-        }
-        article.append(values); container.append(article);
-      }
-    }
+    } else if (visible.length && isFocus()) renderFocus();
+    else for (const [index, row] of visible.entries()) container.append(renderRecord(row, index));
+    updateNavigation();
+    if (ui.reveal) { revealRecord(); ui.reveal = false; }
     if (perf) {
       const done = performance.now(), counts = { revision, busy: !!data.busy, rows: totalRows, columns: fieldIndexes.length, visibleRows: visible.length, request: data.presentation, generation: data.generation };
       perf.add('render.setup', filterStart - start, counts);
@@ -171,24 +259,63 @@
     if (window.gridiffHost) host.postMessage({ action: 'view', view: { ...state } });
     else render();
   }
-  $('grid-tab').addEventListener('click', () => { state.view = 'grid'; requestRender(); });
-  $('list-tab').addEventListener('click', () => { state.view = 'list'; requestRender(); });
+  $('grid-tab').addEventListener('click', () => { state.view = 'grid'; ui.reveal = true; requestRender(); });
+  $('list-tab').addEventListener('click', () => { state.view = 'list'; ui.reveal = true; requestRender(); });
   $('only-changes').addEventListener('change', e => { state.onlyChanges = e.target.checked; state.page = 0; requestRender(); });
   $('only-fields').addEventListener('change', e => { state.onlyFields = e.target.checked; requestRender(); });
   $('search').value = state.query;
   let searchTimer;
-  $('search').addEventListener('input', e => { state.query = e.target.value; state.page = 0; if (window.gridiffHost) host.postMessage({ action: 'view-pending', view: { ...state } }); clearTimeout(searchTimer); searchTimer = setTimeout(requestRender, 150); });
+  function search(event) {
+    clearTimeout(searchTimer);
+    if (event.isComposing) return;
+    state.query = event.target.value; state.page = 0;
+    if (window.gridiffHost) host.postMessage({ action: 'view-pending', view: { ...state } });
+    searchTimer = setTimeout(requestRender, 150);
+  }
+  $('search').addEventListener('input', search); $('search').addEventListener('compositionend', search);
+  $('field-filter').addEventListener('change', event => { state.field = event.target.value; state.page = 0; requestRender(); });
+  $('clear-filters').addEventListener('click', resetFilters);
+  $('previous-record').addEventListener('click', () => navigateRecord(-1));
+  $('next-record').addEventListener('click', () => navigateRecord(1));
+  $('content').addEventListener('click', event => {
+    const record = event.target.closest('[data-record]');
+    if (record && (!$('content').querySelector('.focus-detail') || record.matches('.record-queue button')) && !event.target.closest('details') && !data.busy) selectRecord(Number(record.dataset.record), false);
+  });
+  function applyLayout() {
+    persist();
+    if (!model || state.view !== 'list') return;
+    // Wait for the requested projection so a layout change cannot restore an old page/query.
+    if (data.pageInfo && (data.busy || Object.keys(state).some(key => (state[key] ?? '') !== (data.viewState?.[key] ?? '')))) return;
+    if (isFocus() !== !!$('content').querySelector('.focus-workspace')) { ui.reveal = true; render(); }
+  }
+  window.addEventListener('gridiff-layout', applyLayout);
+  if (!window.gridiffHost) {
+    $('theme-style').addEventListener('change', event => { root.dataset.style = event.target.value; persist(); });
+    $('read-layout').addEventListener('change', event => { root.dataset.layout = event.target.value; window.dispatchEvent(new Event('gridiff-layout')); });
+  }
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && $('settings').open && !document.querySelector('dialog[open]')) {
+      $('settings').open = false; $('settings').querySelector('summary').focus({ preventScroll: true }); event.preventDefault();
+    }
+  });
+  document.addEventListener('click', event => {
+    if ($('settings').open && !$('settings').contains(event.target) && !document.querySelector('dialog[open]')) $('settings').open = false;
+  });
   $('prev').addEventListener('click', () => { state.page = Math.max(0, state.page - 1); requestRender(); });
   $('next').addEventListener('click', () => { state.page = Math.min(pageCount - 1, state.page + 1); requestRender(); });
   $('sheet').addEventListener('change', event => host.postMessage({ action: 'sheet', name: event.target.value }));
   window.addEventListener('message', event => {
     if (window.gridiffHost && event.source !== null) return;
     if (event.data?.type === 'snapshot-replacing') {
-      clearTimeout(searchTimer); state.query = ''; state.page = 0; $('search').value = ''; persist(); return;
+      clearTimeout(searchTimer); state.query = ''; state.field = ''; state.page = 0; ui.selected = null; $('search').value = ''; persist(); return;
     }
     if (event.data?.type === 'session-ended') {
-      data = model = null; state.query = ''; clearTimeout(searchTimer);
-      $('title').textContent = '比较已结束'; $('sources').textContent = ''; $('sources').title = '';
+      data = model = null; state.query = ''; state.field = ''; clearTimeout(searchTimer);
+      ui.rows = []; ui.info = null; ui.selected = null; $('field-filter').replaceChildren();
+      $('content').setAttribute('aria-busy', 'false'); $('settings').inert = true;
+      $('title').textContent = '比较已结束'; $('sources').replaceChildren(); $('source-details').replaceChildren(); $('settings').open = false;
+      $('results').textContent = ''; $('record-position').textContent = '尚未定位'; $('filter-note').hidden = $('clear-filters').hidden = true;
+      $('review-notice').textContent = event.data.message;
       $('summary').replaceChildren(); $('schema-content').replaceChildren(); $('schema-title').textContent = ''; $('schema').hidden = true;
       $('content').replaceChildren(); $('notice').textContent = event.data.message; $('error').hidden = true;
       $('status').textContent = '只读比较'; $('page').textContent = ''; $('search').value = '';
@@ -198,14 +325,31 @@
     }
     if (event.data?.type !== 'comparison') return;
     const changed = !data || revision !== event.data.revision || data.presentation !== event.data.presentation;
+    const contextChanged = data && (data.generation !== event.data.generation || data.sheetName !== event.data.sheetName || JSON.stringify(data.sources) !== JSON.stringify(event.data.sources));
+    if (contextChanged) { ui.selected = null; state.field = ''; }
     data = event.data; model = data.result;
     if (revision !== data.revision) { if (!data.pageInfo) state.page = 0; revision = data.revision; }
     if (changed && !data.busy && data.viewState) { Object.assign(state, data.viewState); $('search').value = state.query; }
     $('title').textContent = data.title;
-    $('sources').textContent = `旧 ${data.sources[0]} → 新 ${data.sources[1]}`; $('sources').title = $('sources').textContent;
+    $('sources').replaceChildren(); $('source-details').replaceChildren();
+    for (const [index, source] of data.sources.entries()) {
+      const label = index ? '新版本' : '旧版本', name = source.split(/[\\/]/).at(-1) || source;
+      const compact = element('span', undefined, `source ${index ? 'after' : 'before'}`);
+      compact.append(element('span', label, 'version-label'), element('span', name)); compact.title = source; $('sources').append(compact);
+      const full = element('p'); full.append(element('strong', label + ' '), document.createTextNode(source)); $('source-details').append(full);
+    }
+    if (changed && !data.busy) {
+      const fields = data.filterFields || model?.fields.map(field => ({ name: field.name, label: (field.after || field.before).label })) || [];
+      if (state.field && !fields.some(field => field.name === state.field)) { state.field = ''; state.page = 0; }
+      const all = element('option', '全部字段'); all.value = ''; $('field-filter').replaceChildren(all);
+      for (const field of fields) { const option = element('option', field.label === field.name ? field.name : `${field.label} · ${field.name}`); option.value = field.name; $('field-filter').append(option); }
+      $('field-filter').value = state.field;
+    }
     $('format').textContent = `格式：${formatNames[data.options.format]}${model && data.options.format === 'auto' ? ` (${model.formats.map(f => formatNames[f]).join(' / ')})` : ''}`;
     $('keys').textContent = data.options.alignment === 'position' ? '对齐：行号' : `主键：${model?.keys.join(' + ') || data.options.keyColumns?.join(' + ') || '自动'}`;
     document.querySelectorAll('[data-action]').forEach(button => { button.disabled = data.busy || (data.unsupported && button.dataset.action !== 'close'); });
+    for (const id of ['grid-tab', 'list-tab', 'only-changes', 'only-fields', 'field-filter', 'search', 'clear-filters']) $(id).disabled = !model || (id !== 'search' && !!data.busy) || (id === 'only-fields' && !!state.field);
+    $('content').setAttribute('aria-busy', String(!!data.busy));
     $('prev').disabled = data.busy || !state.page; $('next').disabled = data.busy || state.page + 1 >= pageCount;
     document.querySelector('[data-action="native"]').hidden = !!data.xlsx || !!data.readonlySnapshot;
     $('sheet-label').hidden = !data.xlsx;
@@ -228,7 +372,10 @@
     }
     if (!data.unsupported) notices.push(data.readonlySnapshot ? '当前显示内存中的只读快照；文件修改后请从 Fork 重新打开比较。' : '当前显示读取时的快照；文件修改后请重新读取。');
     $('notice').textContent = notices.join(' ');
+    $('review-notice').textContent = notices.filter(note => !note.startsWith('XLSX') && !note.startsWith('当前显示')).join(' ');
+    updateNavigation();
     if (changed) { renderSummary(); renderSchema(); render(); }
+    else applyLayout();
   });
   host.postMessage({ action: 'ready', view: { ...state } });
 })();

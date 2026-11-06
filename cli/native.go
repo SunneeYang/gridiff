@@ -54,6 +54,7 @@ type nativePayload struct {
 	SheetSelection   sheetSelection      `json:"sheetSelection"`
 	Skipped          []int               `json:"skipped"`
 	KeyFields        []map[string]string `json:"keyFields"`
+	FilterFields     []map[string]string `json:"filterFields,omitempty"`
 	Busy             bool                `json:"busy"`
 	ReadonlySnapshot bool                `json:"readonlySnapshot"`
 	Sources          []string            `json:"sources"`
@@ -216,6 +217,11 @@ func readNativeView(raw json.RawMessage) (viewState, error) {
 			err = json.Unmarshal(value, &result.OnlyChanges)
 		case "onlyFields":
 			err = json.Unmarshal(value, &result.OnlyFields)
+		case "field":
+			err = json.Unmarshal(value, &result.Field)
+			if len(result.Field) > 4096 {
+				err = errors.New("invalid")
+			}
 		case "query":
 			err = json.Unmarshal(value, &result.Query)
 		case "page":
@@ -412,6 +418,7 @@ func (n *nativeComparison) payload(data *snapshot, id uint64, action, name strin
 		settings.Options = mergeOptions(settings.Options, patch)
 	}
 	if action == "sheet" {
+		view.Field = ""
 		if settings.SheetName != "" {
 			found := false
 			for i, entry := range settings.SheetOptions {
@@ -533,6 +540,20 @@ func (n *nativeComparison) payload(data *snapshot, id uint64, action, name strin
 		}
 	}
 	if current.result != nil && current.failure == "" {
+		found := view.Field == ""
+		for _, field := range current.result.Fields {
+			meta := field.After
+			if meta == nil {
+				meta = field.Before
+			}
+			payload.FilterFields = append(payload.FilterFields, map[string]string{"name": field.Name, "label": meta.Label})
+			found = found || field.Name == view.Field
+		}
+		if !found {
+			view.Field = ""
+			view.Page = 0
+		}
+		payload.ViewState = view
 		payload.ColumnCount = len(current.result.Fields)
 		result, info := projectNativeResult(current.result, view)
 		payload.Result = result

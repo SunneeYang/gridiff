@@ -1,0 +1,899 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gridiff 差异审查原型</title>
+<meta name="description" content="使用仓库演示数据体验 Gridiff 的来源确认、字段筛选和差异阅读方案。">
+<style>
+/* Hallmark · shape: app screen · scope: app · genre: modern-minimal · theme: github-style, material-design, soft-ui, neo-brutalist · modes: light+dark · signature: old/new values in source-table context · surface: absolute · material: repository fixtures · prototype */
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V3 · weakest: E, component families share the same layout and palette for direct comparison */
+:root {
+  --ui-bg: var(--background, #fbfcfd); --ui-fg: var(--foreground, #242933); --ui-muted: var(--muted-foreground, #596170);
+  --ui-line: var(--border, #d5dbe2); --ui-surface: var(--secondary, #f1f3f6); --ui-elevated: var(--popover, #ffffff);
+  --ui-hover: var(--accent, #e8ecf1); --ui-control: var(--border, #77818f); --ui-accent: var(--info, #394b63);
+  --ui-selection: var(--accent, #e5ecf4); --ui-selection-fg: var(--accent-foreground, #263f5b); --ui-focus: var(--ring, #456888);
+  --ui-add: var(--success, #246641); --ui-add-bg: var(--success-surface, #e6f3eb); --ui-add-mark: var(--success-surface, #bde2ca);
+  --ui-remove: var(--destructive, #9b343a); --ui-remove-bg: var(--destructive-surface, #faeaeb); --ui-remove-mark: var(--destructive-surface, #f0c8cd);
+  --ui-modify: var(--warning, #79511c); --ui-modify-bg: var(--warning-surface, #f9efdd);
+  --ui-clear: transparent; --ui-font: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif);
+  --ui-mono: var(--font-mono, ui-monospace, "SFMono-Regular", Consolas, monospace);
+  --ui-serif: "Songti SC", "Noto Serif CJK SC", "SimSun", Georgia, serif; --ui-radius: var(--radius, 6px); --space-0: 0; --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px; --space-6: 24px; --space-8: 32px;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --ui-bg: var(--background, #1b1f26);
+  --ui-fg: var(--foreground, #e7eaf0);
+  --ui-muted: var(--muted-foreground, #b1bac8);
+  --ui-line: var(--border, #414b59);
+  --ui-surface: var(--secondary, #252b34);
+  --ui-elevated: var(--popover, #303844);
+  --ui-hover: var(--accent, #303946);
+  --ui-control: var(--border, #7c8899);
+  --ui-accent: var(--info, #b5c9e8);
+  --ui-selection: var(--accent, #30415a);
+  --ui-selection-fg: var(--accent-foreground, #dce8fb);
+  --ui-focus: var(--ring, #b5c9e8);
+  --ui-add: var(--success, #a0d6b4);
+  --ui-add-bg: var(--success-surface, #263f34);
+  --ui-add-mark: var(--success-surface, #315c44);
+  --ui-remove: var(--destructive, #ffabb3);
+  --ui-remove-bg: var(--destructive-surface, #432c36);
+  --ui-remove-mark: var(--destructive-surface, #633942);
+  --ui-modify: var(--warning, #e6c28a);
+  --ui-modify-bg: var(--warning-surface, #413929);
+} }
+* { box-sizing: border-box; }
+html { color-scheme: light dark; }
+html, body { overflow-x: clip; margin: var(--space-0); }
+body { font: 14px/1.5 var(--ui-font); color: var(--ui-fg); }
+.prototype { max-width: 1480px; margin-inline: auto; }
+.app { container-type: inline-size; background: var(--ui-bg); color: var(--ui-fg); padding: var(--space-4); border-radius: var(--ui-radius); }
+button, select, input { font: inherit; color: inherit; }
+button, select, input[type="search"] { min-height: 44px; border: 1px solid var(--ui-control); border-radius: 6px; background: var(--ui-bg); padding: var(--space-2) var(--space-3); }
+button, select, summary { cursor: pointer; }
+button:hover, summary:hover { background: var(--ui-hover); }
+button:active { border-color: var(--ui-focus); }
+button:disabled, select:disabled, input:disabled { color: var(--ui-muted); background: var(--ui-surface); border-color: var(--ui-line); cursor: not-allowed; }
+:is(button, select, input, summary, a, [tabindex]):focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+::selection { background: var(--ui-selection); color: var(--ui-selection-fg); }
+input { caret-color: var(--ui-focus); accent-color: var(--ui-accent); }
+input::placeholder { color: var(--ui-muted); opacity: 1; }
+button[aria-pressed="true"] { color: var(--ui-selection-fg); border-color: var(--ui-accent); background: var(--ui-selection); font-weight: 600; }
+button.plain { border-color: var(--ui-clear); }
+small, .muted { color: var(--ui-muted); font-size: 12px; }
+code, .number { font-family: var(--ui-mono); font-variant-numeric: tabular-nums; }
+h1, h2, h3, p { margin: var(--space-0); }
+h1, h2 { text-wrap: balance; }
+h1 { font-size: 18px; font-weight: 650; overflow-wrap: break-word; min-width: 0; }
+h2 { font-size: 15px; } h3 { font-size: 14px; }
+.top, .toolbar, .summaryline, .resultbar, .footer, .demo { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.top { justify-content: space-between; margin-bottom: var(--space-2); }
+.top-title { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; }
+.top-title strong { font-size: 14px; }
+.sources { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); padding-block: var(--space-2); }
+.source { min-width: 0; overflow-wrap: anywhere; }
+.source span { color: var(--ui-muted); margin-right: var(--space-2); font-size: 12px; }
+.settings { position: relative; margin: var(--space-0); }
+.header-actions { display: flex; align-items: center; gap: var(--space-3); }
+summary { min-height: 44px; padding: var(--space-3); border-radius: 6px; }
+.settings > summary { width: fit-content; color: var(--ui-muted); }
+.settings-body { position: absolute; right: 0; top: 100%; width: min(520px, 80cqw); z-index: 6; border: 1px solid var(--ui-line); padding: var(--space-3); background: var(--ui-elevated); border-radius: 6px; }
+.settings-body p { max-width: 75ch; margin-bottom: var(--space-2); overflow-wrap: anywhere; }
+.settings-body label { display: inline-flex; align-items: center; gap: var(--space-2); }
+.toolbar { padding-block: var(--space-2); border-top: 1px solid var(--ui-line); }
+.toolbar label { display: flex; align-items: center; gap: var(--space-2); }
+.views { display: flex; gap: var(--space-1); }
+.search { flex: 1; min-width: 180px; }
+.search input { width: 100%; }
+.checkbox { min-height: 44px; padding-inline: var(--space-1); }
+.checkbox input { width: 16px; height: 16px; margin: var(--space-0); }
+.summaryline { padding-block: var(--space-2); gap: var(--space-4); font-size: 13px; }
+.summaryline strong { font-size: 15px; font-variant-numeric: tabular-nums; }
+.modified { color: var(--ui-modify); } .added { color: var(--ui-add); } .removed { color: var(--ui-remove); }
+.overview { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: var(--space-2); border-bottom: 1px solid var(--ui-line); }
+.schema[open] { flex-basis: 100%; }
+.schema summary { color: var(--ui-remove); padding-inline: var(--space-0); }
+.schema p { padding: var(--space-0) var(--space-0) var(--space-3); }
+.resultbar { justify-content: space-between; padding-block: var(--space-2); }
+.navigator { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1); }
+.filter-note { background: var(--ui-surface); padding: var(--space-2) var(--space-3); margin-bottom: var(--space-2); font-size: 13px; }
+.filter-note button { color: var(--ui-accent); }
+.scroll { max-height: 456px; overflow: auto; scrollbar-color: var(--ui-line) var(--ui-bg); border: 1px solid var(--ui-line); border-radius: 6px; }
+.scroll:focus-visible { outline-offset: -3px; }
+table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13px; }
+.grid { min-width: 1000px; }
+.grid.filtered { min-width: 0; max-width: 620px; table-layout: fixed; }
+th, td { text-align: left; vertical-align: top; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--ui-line); }
+thead th { position: sticky; top: 0; background: var(--ui-surface); z-index: 2; font-weight: 600; }
+th small { display: block; font-weight: 400; }
+.grid .identity { position: sticky; left: 0; z-index: 1; width: 170px; min-width: 170px; background: var(--ui-bg); border-right: 1px solid var(--ui-line); }
+.grid thead .identity { z-index: 3; background: var(--ui-surface); }
+.identity strong, .identity code { display: block; }
+.identity code { font-size: 12px; color: var(--ui-muted); }
+.identity .kind { font-size: 12px; font-weight: 400; }
+.identity .kind.modified { background: var(--ui-modify-bg); }
+.grid tbody tr:hover > td, .grid tbody tr:hover > .identity { background: var(--ui-hover); }
+.field-id { width: 112px; min-width: 112px; }
+.field-id .text { white-space: nowrap; } .field-name { min-width: 112px; } .field-price { width: 96px; } .field-quality { width: 76px; } .field-desc { min-width: 230px; } .field-precious { min-width: 108px; }
+.pair { display: grid; gap: var(--space-1); min-width: 0; }
+.value { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; border-radius: 2px; }
+.value .version { font-size: 12px; flex: 0 0 18px; }
+.value .text { overflow-wrap: anywhere; min-width: 0; }
+.value .muted { color: var(--ui-fg); }
+.value.before { background: var(--ui-remove-bg); }
+.value.after { background: var(--ui-add-bg); }
+.value.before .version { color: var(--ui-remove); } .value.after .version { color: var(--ui-add); }
+.number .text { margin-left: auto; } .steady { color: var(--ui-muted); }
+mark { color: inherit; background: var(--ui-selection); }
+.before mark { background: var(--ui-remove-mark); }
+.after mark { background: var(--ui-add-mark); }
+tr.current > * { border-top: 1px solid var(--ui-focus); border-bottom: 1px solid var(--ui-focus); }
+tr.current > :first-child { box-shadow: inset 2px 0 var(--ui-focus); }
+tbody tr:last-child > * { border-bottom: 0; }
+.long-value summary { font-size: 12px; color: var(--ui-accent); padding: var(--space-1); }
+.long-value p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.list { min-width: 560px; max-width: 840px; table-layout: fixed; }
+.list .record-group th { background: var(--ui-surface); }
+.list .record-group code { margin-left: var(--space-2); font-weight: 400; }
+.list th:first-child { width: 26%; }
+.list td { overflow-wrap: anywhere; }
+.list .value { min-height: 24px; }
+.empty { padding: var(--space-8); text-align: center; min-height: 224px; }
+.empty p { margin-block: var(--space-2) var(--space-4); }
+.skeleton { padding: var(--space-4); }
+.skeleton span { display: block; height: 40px; margin-bottom: var(--space-2); background: var(--ui-surface); border-radius: 4px; }
+.footer { justify-content: space-between; padding-top: var(--space-3); font-size: 12px; color: var(--ui-muted); }
+.demo { justify-content: space-between; margin-top: var(--space-3); font-size: 12px; color: var(--ui-muted); }
+.demo label { display: flex; align-items: center; gap: var(--space-2); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: clip; clip-path: inset(50%); }
+[hidden] { display: none !important; }
+@media (max-width: 760px) {
+  .grid { min-width: 960px; } .grid .identity { min-width: 144px; width: 144px; }
+  .toolbar { gap: var(--space-2); } .search { flex-basis: 100%; }
+  .summaryline { gap: var(--space-3); }
+}
+@media (max-width: 480px) {
+  .sources { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+  .resultbar { align-items: flex-start; } .scroll { max-height: 480px; }
+  .grid .identity { min-width: 128px; width: 128px; }
+  .list { min-width: 0; table-layout: auto; }
+  .list .record-group th { position: static; }
+  .list td, .list th { padding: var(--space-2); }
+  .list th:first-child { width: 30%; }
+  .navigator { width: 100%; justify-content: space-between; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+
+.theme-lab { margin-bottom: var(--space-4); }
+.theme-options { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: var(--space-3); margin-block: var(--space-2); }
+.theme-options select { width: 100%; min-width: 0; color: var(--ui-fg); font-size: 14px; }
+.component-gallery > summary { width: fit-content; padding-inline: 0; color: var(--ui-muted); font-size: 12px; }
+.component-gallery > p { font-size: 12px; color: var(--ui-muted); margin-block: var(--space-2); }
+.theme-legend { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--ui-line); font-size: 12px; }
+.theme-legend span { display: inline-flex; align-items: center; gap: var(--space-1); }
+.theme-legend i { width: 14px; height: 14px; background: var(--chip); border: 1px solid var(--ui-control); border-radius: 3px; }
+.theme-gallery { margin-top: var(--space-4); }
+.gallery-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); margin-bottom: var(--space-3); }
+.palette-sample { padding: var(--space-3); border: 1px solid var(--ui-line); border-radius: 6px; background: var(--ui-bg); color: var(--ui-fg); }
+.palette-sample h3 { margin-bottom: var(--space-2); }
+.palette-sample .sample-head { background: var(--ui-surface); padding: var(--space-2); font-size: 12px; }
+.palette-sample .pair { margin-block: var(--space-2); }
+.palette-sample button { min-height: 44px; font-size: 12px; color: var(--ui-selection-fg); background: var(--ui-selection); border-color: var(--ui-accent); }
+@media (max-width: 600px) { .theme-options { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (forced-colors: active) { mark { outline: 1px solid; } tr.current > * { outline: 1px solid; } }
+
+.style-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-4); padding-block: var(--space-2) var(--space-4); }
+.style-preview { min-width: 0; padding: var(--space-4); }
+.style-preview h2 { font-size: 16px; }
+.style-preview > p { font-size: 12px; color: var(--ui-muted); margin-top: var(--space-1); }
+.sample-components { display: grid; gap: var(--space-4); margin-top: var(--space-4); }
+.sample-components input, .sample-components > button { width: 100%; min-width: 0; }
+.sample-status { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.sample-tab { padding: var(--space-2) var(--space-3); font-size: 13px; }
+.theme-options label { display: grid; gap: var(--space-1); min-width: 0; font-size: 12px; color: var(--ui-muted); }
+.app[data-layout="matrix"] .sources { background: var(--ui-surface); padding: var(--space-2) var(--space-3); }
+.app[data-layout="matrix"] .overview { border-top: 1px solid var(--ui-line); }
+.app[data-layout="matrix"] th, .app[data-layout="matrix"] td { padding: var(--space-1) var(--space-2); border-right: 1px solid var(--ui-line); }
+.app[data-layout="matrix"] .identity .kind { float: right; margin-left: var(--space-1); }
+.app[data-layout="matrix"] .scroll { max-height: 540px; }
+.app[data-layout="paper"] { max-width: 1120px; margin-inline: auto; padding: var(--space-6) var(--space-8); border-radius: 0; }
+.app[data-layout="paper"] .top { padding-bottom: var(--space-4); border-bottom: 2px solid var(--ui-fg); }
+.app[data-layout="paper"] .sources { padding-block: var(--space-4); }
+.app[data-layout="paper"] .scroll { max-height: 650px; border: 0; border-top: 1px solid var(--ui-line); border-radius: 0; }
+.proof-record { padding: var(--space-6) var(--space-2) var(--space-8); border-bottom: 1px solid var(--ui-line); scroll-margin-top: var(--space-3); }
+.proof-record > header { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-3); margin-bottom: var(--space-5); }
+.proof-record h2 { font: 600 24px/1.4 var(--ui-serif); }
+.proof-record header code { color: var(--ui-muted); font-size: 13px; }
+.proof-record .kind { margin-left: auto; font-size: 13px; }
+.proof-field { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: var(--space-4); margin-top: var(--space-4); }
+.field-label { font-size: 13px; }
+.field-label code { display: block; color: var(--ui-muted); font-size: 12px; }
+.proof-values { min-width: 0; font-size: 16px; line-height: 1.7; }
+.proof-values .value { padding: var(--space-1) var(--space-2); }
+.proof-record.current { outline: 2px solid var(--ui-focus); outline-offset: -2px; }
+.app[data-layout="focus"] .sources { padding: var(--space-3); background: var(--ui-bg); border-radius: 8px; }
+.app[data-layout="focus"] .toolbar { border-top: 0; padding-top: var(--space-4); }
+.app[data-layout="focus"] .scroll { max-height: 600px; border: 0; border-radius: 0; }
+.focus-workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.record-queue { display: grid; gap: var(--space-1); position: sticky; top: var(--space-1); padding: var(--space-1); max-height: 580px; overflow: auto; }
+.queue-item { width: 100%; text-align: left; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-1) var(--space-2); padding: var(--space-3); min-height: 64px; border-color: var(--ui-clear); background: var(--ui-clear); }
+.queue-item strong { font-size: 14px; overflow-wrap: anywhere; }
+.queue-item code { grid-row: 2; font-size: 12px; color: var(--ui-muted); }
+.queue-item .kind { font-size: 12px; }
+.queue-item[aria-pressed="true"] code { color: var(--ui-selection-fg); }
+.focus-detail { background: var(--ui-bg); border-radius: 8px; padding: var(--space-5); min-width: 0; }
+.focus-detail > header { padding-bottom: var(--space-4); border-bottom: 1px solid var(--ui-line); }
+.focus-detail h2 { font-size: 24px; margin-block: var(--space-1); overflow-wrap: anywhere; }
+.focus-detail .detail-status { display: flex; justify-content: space-between; gap: var(--space-2); font-size: 12px; }
+.focus-field { margin-top: var(--space-5); }
+.focus-field .field-label { display: flex; align-items: baseline; gap: var(--space-2); margin-bottom: var(--space-2); }
+.focus-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.focus-values .value { display: block; padding: var(--space-3); min-height: 60px; }
+.focus-values .version { display: block; margin-bottom: var(--space-2); }
+.app[data-layout="terminal"] .top { border-bottom: 1px solid var(--ui-control); padding-bottom: var(--space-2); }
+.app[data-layout="terminal"] .sources { display: block; padding: var(--space-2); background: var(--ui-surface); }
+.app[data-layout="terminal"] .sources .source { display: flex; gap: var(--space-2); }
+.app[data-layout="terminal"] .overview { background: var(--ui-surface); padding-inline: var(--space-2); }
+.app[data-layout="terminal"] .scroll { max-height: 580px; }
+.app[data-layout="terminal"] .footer { color: var(--ui-muted); background: var(--ui-surface); padding: var(--space-1) var(--space-2); margin-top: var(--space-2); }
+.terminal-record { border-bottom: 1px solid var(--ui-line); padding-block: var(--space-2); }
+.terminal-record > header { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-1) var(--space-3); background: var(--ui-surface); }
+.terminal-record h2 { font-size: 14px; font-weight: 600; }
+.terminal-record .kind { margin-left: auto; font-size: 12px; }
+.terminal-record.current > header { outline: 2px solid var(--ui-focus); outline-offset: -2px; }
+.patch-field { display: grid; grid-template-columns: 156px minmax(0, 1fr); padding: var(--space-1) var(--space-3); gap: var(--space-2); }
+.patch-field .field-label code { color: var(--ui-fg); font-size: 13px; }
+.patch-field .field-label span { display: block; color: var(--ui-muted); font-family: var(--ui-font); font-size: 12px; }
+.patch-values { min-width: 0; line-height: 24px; }
+.patch-values .pair { gap: 0; }
+.patch-values .value { border-radius: 0; }
+.patch-values .text { white-space: pre-wrap; }
+@media (max-width: 760px) { .focus-workspace { grid-template-columns: 170px minmax(0, 1fr); } .focus-values { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 480px) {
+  .style-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .app[data-layout="paper"] { padding: var(--space-4); } .app[data-layout="paper"] h1 { font-size: 28px; }
+  .proof-field { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
+  .proof-record h2 { font-size: 22px; } .proof-values { font-size: 15px; }
+  .focus-workspace { display: block; }
+  .record-queue { display: flex; position: static; overflow-x: auto; margin-bottom: var(--space-3); }
+  .queue-item { min-width: 156px; width: 156px; flex-shrink: 0; }
+  .focus-detail { padding: var(--space-4); } .focus-detail h2 { font-size: 22px; }
+  .patch-field { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+  .patch-field .field-label { display: flex; align-items: baseline; gap: var(--space-2); }
+}
+/* Component appearance is independent of the reading layout. */
+.visual-theme {
+  --skin-shadow: color-mix(in srgb, var(--ui-fg) 18%, transparent);
+  --skin-soft-shadow: color-mix(in srgb, var(--ui-accent) 22%, transparent);
+  --skin-ink: var(--ui-fg); --skin-paper: var(--ui-bg);
+  background: var(--ui-bg); color: var(--ui-fg);
+}
+.visual-theme :is(button,select,input[type="search"]) { font-size: 14px; }
+.visual-theme .primary-action { background: var(--ui-accent); color: var(--ui-bg); }
+.visual-theme .kind { display: inline-block; font: 500 12px/1.5 var(--ui-font); white-space: nowrap; }
+.visual-theme .kind.modified { color: var(--ui-modify); background: var(--ui-modify-bg); }
+.visual-theme .kind.added { color: var(--ui-add); background: var(--ui-add-bg); }
+.visual-theme .kind.removed { color: var(--ui-remove); background: var(--ui-remove-bg); }
+.visual-theme .kind.schema, .visual-theme .kind.unchanged { color: var(--ui-muted); background: var(--ui-surface); }
+.visual-theme select { appearance: none; padding-right: var(--space-8); background-image: var(--select-arrow); background-repeat: no-repeat; background-position: right 12px center; background-size: 12px; }
+.visual-theme input[type="checkbox"] { appearance: none; display: inline-grid; place-content: center; width: 18px; height: 18px; border: 1px solid var(--ui-control); background: var(--ui-bg); border-radius: 3px; flex-shrink: 0; }
+.visual-theme input[type="checkbox"]:checked { background: var(--ui-accent); border-color: var(--ui-accent); }
+.visual-theme input[type="checkbox"]:checked::after { content: ""; width: 8px; height: 4px; border: solid var(--ui-bg); border-width: 0 0 2px 2px; transform: rotate(-45deg); margin-top: -2px; }
+.visual-theme[data-style="github"] { border-radius: 6px; border: 1px solid var(--ui-line); }
+.visual-theme[data-style="github"] :is(button,select,input[type="search"]) { border: 1px solid var(--ui-control); border-radius: 6px; background-color: var(--ui-surface); box-shadow: 0 1px 1px var(--skin-shadow); }
+.visual-theme[data-style="github"] button:hover:not(:disabled) { background-color: var(--ui-hover); }
+.visual-theme[data-style="github"] button:active:not(:disabled) { box-shadow: inset 0 1px 3px var(--skin-shadow); }
+.visual-theme[data-style="github"] input[type="search"]:focus { background: var(--ui-elevated); }
+.visual-theme[data-style="github"] button.primary-action { background: var(--ui-accent); color: var(--ui-bg); border-color: var(--ui-accent); }
+.visual-theme[data-style="github"] button.primary-action:hover:not(:disabled) { background: var(--ui-accent); }
+.visual-theme[data-style="github"] .views { width: fit-content; padding: var(--space-1); gap: var(--space-1); border: 1px solid var(--ui-line); border-radius: 8px; background: var(--ui-surface); }
+.visual-theme[data-style="github"] .views :is(button,.sample-tab) { border: 0; border-radius: 4px; box-shadow: none; background: var(--ui-clear); color: var(--ui-muted); }
+.visual-theme[data-style="github"] .views :is([aria-pressed="true"],.selected) { background: var(--ui-elevated); color: var(--ui-fg); box-shadow: 0 1px 3px var(--skin-shadow); }
+.visual-theme[data-style="github"] .kind { border: 1px solid currentColor; padding: 0 var(--space-2); border-radius: 999px; }
+.visual-theme[data-style="github"] .value { border-radius: 2px; }
+.visual-theme[data-style="github"] .settings-body { border: 1px solid var(--ui-line); border-radius: 6px; box-shadow: none; }
+.visual-theme[data-style="material"] { border: 0; border-radius: 12px; background: var(--ui-bg); }
+.visual-theme[data-style="material"] h1 { font-size: 24px; font-weight: 500; }
+.visual-theme[data-style="material"] button { border: 1px solid var(--ui-control); border-radius: 999px; background: var(--ui-clear); padding-inline: var(--space-5); box-shadow: none; }
+.visual-theme[data-style="material"] button.primary-action { border: 0; background: var(--ui-accent); color: var(--ui-bg); box-shadow: 0 2px 4px var(--skin-shadow); }
+.visual-theme[data-style="material"] button.primary-action:hover:not(:disabled) { box-shadow: 0 4px 8px var(--skin-shadow); }
+.visual-theme[data-style="material"] button.primary-action:active:not(:disabled) { box-shadow: none; }
+.visual-theme[data-style="material"] :is(input[type="search"],select) { border: 0; border-bottom: 2px solid var(--ui-control); border-radius: 8px 8px 0 0; background-color: var(--ui-surface); box-shadow: none; }
+.visual-theme[data-style="material"] :is(input[type="search"],select):focus { border-bottom-color: var(--ui-accent); }
+.visual-theme[data-style="material"] .views { gap: 0; border-bottom: 1px solid var(--ui-line); }
+.visual-theme[data-style="material"] .views :is(button,.sample-tab) { border: 0; border-bottom: 3px solid var(--ui-clear); border-radius: 0; background: var(--ui-clear); color: var(--ui-muted); box-shadow: none; }
+.visual-theme[data-style="material"] .views :is([aria-pressed="true"],.selected) { border-bottom-color: var(--ui-accent); color: var(--ui-accent); }
+.visual-theme[data-style="material"] .kind { padding: var(--space-1) var(--space-2); border: 0; border-radius: 8px; }
+.visual-theme[data-style="material"] .value { padding-inline: var(--space-1); border-radius: 4px; }
+.visual-theme[data-style="material"] :is(.scroll,.settings-body) { border: 0; border-radius: 12px; box-shadow: 0 2px 6px var(--skin-shadow); }
+.visual-theme[data-style="material"] :is(th,td) { border-right: 0; padding-block: var(--space-2); }
+.visual-theme[data-style="material"] .grid .identity { border-right: 1px solid var(--ui-line); }
+.visual-theme[data-style="soft"] { border: 0; border-radius: 24px; background: var(--ui-surface); }
+.visual-theme[data-style="soft"] h1 { font-size: 24px; font-weight: 600; }
+.visual-theme[data-style="soft"] .toolbar { gap: var(--space-4); padding-block: var(--space-4); border-top: 0; }
+.visual-theme[data-style="soft"] :is(button,select,input[type="search"]) { border: 0; border-radius: 16px; }
+.visual-theme[data-style="soft"] button { background: var(--ui-elevated); box-shadow: 0 6px 16px var(--skin-shadow); transition: transform 160ms cubic-bezier(.23,1,.32,1); }
+.visual-theme[data-style="soft"] button.primary-action { background: var(--ui-accent); color: var(--ui-bg); box-shadow: 0 8px 24px var(--skin-soft-shadow); }
+.visual-theme[data-style="soft"] button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 10px 24px var(--skin-soft-shadow); }
+.visual-theme[data-style="soft"] button:active:not(:disabled) { transform: translateY(0) scale(.98); box-shadow: inset 0 2px 6px var(--skin-shadow); }
+.visual-theme[data-style="soft"] :is(input[type="search"],select) { background-color: var(--ui-bg); box-shadow: inset 0 2px 4px var(--skin-shadow); }
+.visual-theme[data-style="soft"] :is(input[type="search"],select):focus { background-color: var(--ui-elevated); }
+.visual-theme[data-style="soft"] .views { gap: var(--space-1); background: var(--ui-bg); border-radius: 20px; padding: var(--space-1); }
+.visual-theme[data-style="soft"] .views :is(button,.sample-tab) { background: var(--ui-clear); color: var(--ui-muted); border: 0; box-shadow: none; border-radius: 16px; }
+.visual-theme[data-style="soft"] .views :is([aria-pressed="true"],.selected) { background: var(--ui-elevated); color: var(--ui-fg); box-shadow: 0 3px 12px var(--skin-shadow); }
+.visual-theme[data-style="soft"] .kind { border: 0; padding: var(--space-1) var(--space-2); border-radius: 999px; }
+.visual-theme[data-style="soft"] .value { border-radius: 8px; padding-inline: var(--space-2); }
+.visual-theme[data-style="soft"] :is(.scroll,.settings-body) { border: 0; border-radius: 20px; background: var(--ui-elevated); box-shadow: 0 8px 24px var(--skin-shadow); }
+.visual-theme[data-style="soft"] :is(th,td) { padding-block: var(--space-3); border-right: 0; }
+.visual-theme[data-style="soft"] input[type="checkbox"] { border-radius: 6px; }
+.visual-theme[data-style="brutalist"] { border: 2px solid var(--skin-ink); border-radius: 0; }
+.visual-theme[data-style="brutalist"] h1 { font-size: 24px; font-weight: 900; }
+.visual-theme[data-style="brutalist"] :is(button,input[type="search"],select) { border: 2px solid var(--skin-ink); border-radius: 0; background-color: var(--skin-paper); font-weight: 700; }
+.visual-theme[data-style="brutalist"] button { box-shadow: 3px 3px 0 var(--skin-ink); }
+.visual-theme[data-style="brutalist"] button:hover:not(:disabled) { transform: translate(-1px,-1px); box-shadow: 4px 4px 0 var(--skin-ink); }
+.visual-theme[data-style="brutalist"] button:active:not(:disabled) { transform: translate(3px,3px); box-shadow: none; }
+.visual-theme[data-style="brutalist"] button.primary-action { background: var(--ui-accent); color: var(--ui-bg); }
+.visual-theme[data-style="brutalist"] :is(input[type="search"],select):focus { box-shadow: 3px 3px 0 var(--skin-ink); }
+.visual-theme[data-style="brutalist"] .views { gap: 0; border: 2px solid var(--skin-ink); }
+.visual-theme[data-style="brutalist"] .views :is(button,.sample-tab) { border: 0; border-radius: 0; background: var(--skin-paper); color: var(--skin-ink); box-shadow: none; font-weight: 700; }
+.visual-theme[data-style="brutalist"] .views :is([aria-pressed="true"],.selected) { color: var(--skin-paper); background: var(--skin-ink); }
+.visual-theme[data-style="brutalist"] .kind { border: 2px solid currentColor; padding: 0 var(--space-1); border-radius: 0; font-weight: 700; }
+.visual-theme[data-style="brutalist"] .value { border-radius: 0; padding-inline: var(--space-1); }
+.visual-theme[data-style="brutalist"] :is(.scroll,.settings-body) { border: 2px solid var(--skin-ink); border-radius: 0; box-shadow: 4px 4px 0 var(--skin-ink); }
+.visual-theme[data-style="brutalist"] thead th { border-bottom: 2px solid var(--skin-ink); }
+.visual-theme[data-style="brutalist"] input[type="checkbox"] { border: 2px solid var(--skin-ink); border-radius: 0; }
+.visual-theme[data-style] :is(button,select,input):disabled { color: var(--ui-muted); background-color: var(--ui-surface); border-color: var(--ui-line); box-shadow: none; transform: none; cursor: not-allowed; }
+.visual-theme :is(button,select,input,summary):focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 3px; }
+.visual-theme .queue-item { text-align: left; padding: var(--space-3); }
+.visual-theme .queue-item[aria-pressed="true"] { color: var(--ui-selection-fg); background: var(--ui-selection); }
+.visual-theme .queue-item .kind { font-size: 11px; padding-inline: var(--space-1); }
+.visual-theme .settings > summary { border-radius: 6px; }
+.visual-theme[data-style="brutalist"] .settings > summary { border-radius: 0; }
+@media (max-width: 1000px) { .style-options { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 480px) {
+  .style-options { gap: var(--space-3); }.style-preview { padding: var(--space-3); }.sample-tab { padding: var(--space-2); }
+  .style-preview h2 { font-size: 14px; }.style-preview > p { min-height: 36px; }
+  .visual-theme .header-actions { gap: var(--space-1); }.visual-theme .kind { white-space: normal; }
+}
+@media (prefers-reduced-motion: reduce) { .visual-theme button { transition: none; }.visual-theme button:hover, .visual-theme button:active { transform: none; } }
+@media (forced-colors: active) { .visual-theme input[type="checkbox"] { appearance: auto; }.visual-theme input[type="checkbox"]::after { display: none; }.visual-theme :is(button,input,select) { border: 1px solid; } }
+</style>
+</head>
+<body>
+<div class="prototype">
+<section class="theme-lab" aria-label="风格与配色预览">
+  <div class="theme-options"><label>组件主题 <select id="style"></select></label><label>阅读布局 <select id="layout"></select></label><label>配色 <select id="palette"></select></label><label>明暗 <select id="theme"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label></div>
+  <details class="component-gallery" id="component-gallery"><summary>比较四种组件风格</summary>
+    <p>同一配色下比较按钮、输入框、页签与标签。试样输入框只读；下方表格可以搜索和筛选。</p>
+    <div class="style-options" id="style-options" role="group" aria-label="组件风格试样：输入框为只读样本，按钮用于应用风格"></div>
+    <p id="style-description" role="status"></p>
+  </details>
+  <span id="theme-description" hidden></span>
+</section>
+<main class="app visual-theme" id="app">
+  <header>
+    <div class="top"><div class="top-title"><strong>Gridiff</strong><h1>道具配置</h1></div><div class="header-actions"><span class="muted">只读快照</span><details class="settings" id="settings"><summary>来源与设置</summary><div class="settings-body">
+      <p>旧：<code>演示目录/道具配置-修改前.xlsx</code><br>新：<code>演示目录/道具配置-修改后.xlsx</code></p>
+      <p>当前已载入 2 张工作表。按 <code>id</code> 对齐；道具表使用 Mova 四行表头。这里只切换已载入的表。</p>
+      <p>比较保存时的单元格结果，不比较公式与样式；公式缺少缓存结果时按空值处理。文件修改后，需重新发起比较。</p>
+      <p id="current-theme" class="muted"></p>
+      <p class="muted">原型的风格、配色与明暗在页面上方切换；正式产品保留此处的外观设置入口。格式、主键、交换版本等操作暂未接入。</p>
+    </div></details></div></div>
+    <div class="sources" aria-label="比较方向">
+      <p class="source"><span>旧版本</span><b>道具配置-修改前.xlsx</b></p>
+      <p class="source"><span>新版本</span><b>道具配置-修改后.xlsx</b></p>
+    </div>
+
+  </header>
+  <section class="toolbar" aria-label="查看差异">
+    <label>工作表 <select id="sheet"><option value="items">道具表</option><option value="drops">掉落表</option></select></label>
+    <div class="views" role="group" aria-label="视图"><button id="grid-view" aria-pressed="true">原表对照</button><button id="list-view" aria-pressed="false">变更清单</button></div>
+    <label>字段 <select id="field"></select></label>
+    <label class="checkbox"><input type="checkbox" id="only" checked>仅含变化记录</label>
+    <label class="search"><span class="sr-only">搜索记录或值</span><input type="search" id="query" placeholder="搜索名称、编号或旧新值"></label>
+  </section>
+  <div class="overview"><section class="summaryline" id="summary" aria-label="当前工作表统计"></section>
+  <details class="schema" id="schema"><summary>删除字段 1：是否贵重 <code>precious</code></summary><p>新版本不再包含此字段。所有旧值都可以在原表中查看；仅受此变化影响的记录标为“仅字段变化”。</p></details></div>
+  <div class="resultbar"><span id="results" role="status"></span><div class="navigator" aria-label="在当前结果中定位记录"><span class="muted" id="position">尚未定位</span><button id="previous" disabled>上一条</button><button id="next" class="primary-action">下一条</button></div></div>
+  <div class="filter-note" id="filter-note" hidden><span id="filter-text"></span><button class="plain" id="reset">清除筛选</button></div>
+  <section class="scroll" id="content" tabindex="0" aria-label="差异内容，可横向滚动">
+    <div class="empty"><h2>道具表的仓库演示数据</h2><p>生命药水价格：旧 40，新 60；恢复效果：旧 30%，新 40%。</p><noscript>启用 JavaScript 可使用筛选、切换视图与差异导航。</noscript></div>
+  </section>
+  <footer class="footer"><span id="footer">按 id 对齐</span><span>定位不代表已审查</span></footer>
+</main>
+<aside class="demo" aria-label="原型演示控制"><span>交互原型，使用仓库演示数据，不读取或修改文件。</span><label>演示状态 <select id="scenario"><option value="normal">正常差异</option><option value="long">长文本（合成）</option><option value="loading">读取中</option><option value="error">读取失败</option><option value="same">没有差异</option></select></label></aside>
+<details class="theme-gallery"><summary>比较配色（不改变风格结构）</summary><div class="theme-legend" id="theme-legend" aria-label="当前配色的颜色角色"></div><div id="theme-gallery"></div></details>
+</div>
+<script type="application/json" id="palette-data">
+{
+  "default": {
+    "name": "默认",
+    "tone": "石墨",
+    "description": "中性灰与钢蓝，优先阅读数值。",
+    "light": {
+      "bg": "#fbfcfd",
+      "fg": "#242933",
+      "muted": "#596170",
+      "line": "#d5dbe2",
+      "surface": "#f1f3f6",
+      "elevated": "#ffffff",
+      "hover": "#e8ecf1",
+      "control": "#77818f",
+      "accent": "#394b63",
+      "selection": "#e5ecf4",
+      "selection-fg": "#263f5b",
+      "focus": "#456888",
+      "add": "#246641",
+      "add-bg": "#e6f3eb",
+      "add-mark": "#bde2ca",
+      "remove": "#9b343a",
+      "remove-bg": "#faeaeb",
+      "remove-mark": "#f0c8cd",
+      "modify": "#79511c",
+      "modify-bg": "#f9efdd"
+    },
+    "dark": {
+      "bg": "#1b1f26",
+      "fg": "#e7eaf0",
+      "muted": "#b1bac8",
+      "line": "#414b59",
+      "surface": "#252b34",
+      "elevated": "#303844",
+      "hover": "#303946",
+      "control": "#7c8899",
+      "accent": "#b5c9e8",
+      "selection": "#30415a",
+      "selection-fg": "#dce8fb",
+      "focus": "#b5c9e8",
+      "add": "#a0d6b4",
+      "add-bg": "#263f34",
+      "add-mark": "#315c44",
+      "remove": "#ffabb3",
+      "remove-bg": "#432c36",
+      "remove-mark": "#633942",
+      "modify": "#e6c28a",
+      "modify-bg": "#413929"
+    }
+  },
+  "github": {
+    "name": "GitHub",
+    "tone": "清晰",
+    "description": "白与冷灰、正蓝交互，差异边界鲜明。",
+    "light": {
+      "bg": "#ffffff",
+      "fg": "#1f2328",
+      "muted": "#59636e",
+      "line": "#d1d9e0",
+      "surface": "#f6f8fa",
+      "elevated": "#ffffff",
+      "hover": "#eaeef2",
+      "control": "#767f89",
+      "accent": "#0864ce",
+      "selection": "#ddedff",
+      "selection-fg": "#084d9f",
+      "focus": "#0969da",
+      "add": "#116329",
+      "add-bg": "#dafbe1",
+      "add-mark": "#b4e9c2",
+      "remove": "#9c2531",
+      "remove-bg": "#ffebe9",
+      "remove-mark": "#ffc4c2",
+      "modify": "#7d4e00",
+      "modify-bg": "#fff4cf"
+    },
+    "dark": {
+      "bg": "#0d1117",
+      "fg": "#e6edf3",
+      "muted": "#9da7b3",
+      "line": "#3d444d",
+      "surface": "#161b22",
+      "elevated": "#212831",
+      "hover": "#262c36",
+      "control": "#6e7d8f",
+      "accent": "#79c0ff",
+      "selection": "#183451",
+      "selection-fg": "#b6dcff",
+      "focus": "#79c0ff",
+      "add": "#7ee787",
+      "add-bg": "#153721",
+      "add-mark": "#225637",
+      "remove": "#ffa198",
+      "remove-bg": "#492128",
+      "remove-mark": "#74353b",
+      "modify": "#e3b341",
+      "modify-bg": "#3e321a"
+    }
+  },
+  "catppuccin": {
+    "name": "Catppuccin",
+    "tone": "柔紫",
+    "description": "淡紫灰与柔和紫色交互，保留明确的旧新对比。",
+    "light": {
+      "bg": "#eff1f5",
+      "fg": "#4c4f69",
+      "muted": "#5c5f77",
+      "line": "#bcc0cc",
+      "surface": "#e6e9ef",
+      "elevated": "#f8f9fc",
+      "hover": "#dce0e8",
+      "control": "#777b90",
+      "accent": "#7c31dc",
+      "selection": "#e5d8f4",
+      "selection-fg": "#6d3198",
+      "focus": "#8839ef",
+      "add": "#356315",
+      "add-bg": "#deebcf",
+      "add-mark": "#c5dca7",
+      "remove": "#b41439",
+      "remove-bg": "#f4d9e0",
+      "remove-mark": "#edbbcc",
+      "modify": "#805a00",
+      "modify-bg": "#f8ebca"
+    },
+    "dark": {
+      "bg": "#1e1e2e",
+      "fg": "#cdd6f4",
+      "muted": "#acb5d1",
+      "line": "#51536b",
+      "surface": "#29293d",
+      "elevated": "#34344b",
+      "hover": "#35354d",
+      "control": "#8185a2",
+      "accent": "#cba6f7",
+      "selection": "#433454",
+      "selection-fg": "#ead9ff",
+      "focus": "#cba6f7",
+      "add": "#a6e3a1",
+      "add-bg": "#293e37",
+      "add-mark": "#3e5e4a",
+      "remove": "#f38ba8",
+      "remove-bg": "#482e41",
+      "remove-mark": "#6d3e59",
+      "modify": "#f9e2af",
+      "modify-bg": "#443e33"
+    }
+  },
+  "solarized": {
+    "name": "Solarized",
+    "tone": "暖纸",
+    "description": "暖纸与青墨、蓝青交互，调低大面积的刺激感。",
+    "light": {
+      "bg": "#fdf6e3",
+      "fg": "#40575e",
+      "muted": "#50656c",
+      "line": "#c6c5b7",
+      "surface": "#eee8d5",
+      "elevated": "#fffaf0",
+      "hover": "#e4ddc8",
+      "control": "#767d70",
+      "accent": "#006395",
+      "selection": "#d9e9e6",
+      "selection-fg": "#00586e",
+      "focus": "#006a9d",
+      "add": "#526600",
+      "add-bg": "#e4eac5",
+      "add-mark": "#c5d596",
+      "remove": "#a02e2b",
+      "remove-bg": "#f8dfcf",
+      "remove-mark": "#f1bead",
+      "modify": "#785400",
+      "modify-bg": "#f3e7bc"
+    },
+    "dark": {
+      "bg": "#002b36",
+      "fg": "#d4d8c8",
+      "muted": "#a1b5b5",
+      "line": "#41616a",
+      "surface": "#073642",
+      "elevated": "#11434e",
+      "hover": "#164651",
+      "control": "#78979c",
+      "accent": "#80c7d8",
+      "selection": "#184854",
+      "selection-fg": "#c4edf2",
+      "focus": "#80c7d8",
+      "add": "#b1c76b",
+      "add-bg": "#254535",
+      "add-mark": "#3b5b39",
+      "remove": "#f39382",
+      "remove-bg": "#463b3a",
+      "remove-mark": "#67453d",
+      "modify": "#e3be69",
+      "modify-bg": "#49462d"
+    }
+  },
+  "nord": {
+    "name": "Nord",
+    "tone": "冷雾",
+    "description": "雪灰与极夜蓝、冰蓝交互，让彩色差异从底色中浮现。",
+    "light": {
+      "bg": "#eceff4",
+      "fg": "#2e3440",
+      "muted": "#4c566a",
+      "line": "#b2bdce",
+      "surface": "#e5e9f0",
+      "elevated": "#f5f7fa",
+      "hover": "#d8dee9",
+      "control": "#6d7b90",
+      "accent": "#3f6382",
+      "selection": "#d6e4ed",
+      "selection-fg": "#36556e",
+      "focus": "#3f6382",
+      "add": "#426532",
+      "add-bg": "#d6e6d3",
+      "add-mark": "#b8d4b1",
+      "remove": "#963d4a",
+      "remove-bg": "#f0d7de",
+      "remove-mark": "#e3b6c2",
+      "modify": "#76501e",
+      "modify-bg": "#f2e6ce"
+    },
+    "dark": {
+      "bg": "#2e3440",
+      "fg": "#eceff4",
+      "muted": "#b8c3d7",
+      "line": "#59667e",
+      "surface": "#394353",
+      "elevated": "#444f61",
+      "hover": "#434c5e",
+      "control": "#95a2b8",
+      "accent": "#9acbda",
+      "selection": "#344f60",
+      "selection-fg": "#c9e5ec",
+      "focus": "#88c0d0",
+      "add": "#b4d5a0",
+      "add-bg": "#3b4c43",
+      "add-mark": "#4b6353",
+      "remove": "#e6a1ab",
+      "remove-bg": "#53404d",
+      "remove-mark": "#724c5a",
+      "modify": "#ebcb8b",
+      "modify-bg": "#514c3e"
+    }
+  }
+}
+</script>
+<script>
+'use strict';
+// Prototype only: fixed fixtures; native Go / plugin comparison logic is not duplicated here.
+const $ = id => document.getElementById(id);
+const palettes = JSON.parse($('palette-data').textContent);
+const systemTheme = matchMedia('(prefers-color-scheme: dark)');
+const appearance = {palette:'default',mode:'system',style:'material',layout:'matrix'};
+const layouts = {
+  matrix:{name:'精密矩阵',hint:'完整网格 / 紧凑扫描',description:'同时比较多条记录和多个字段，固定表头与记录列。',view:'grid'},
+  paper:{name:'纸面校对',hint:'衬线标题 / 段落阅读',description:'按记录连续校对，长描述完整展开，旧新值就地对照。',view:'list'},
+  focus:{name:'焦点审阅',hint:'记录队列 / 单项详情',description:'从左侧选择记录，右侧只展示这一条；上下条连续检查。',view:'list'},
+  terminal:{name:'紧凑终端',hint:'等宽字段 / 文本差异',description:'按记录和字段展开差异流，编号、字段路径与值沿固定列对齐。',view:'list'}
+};
+const styles = {
+  github:{name:'GitHub',hint:'细描边 · 分段控件',description:'1px 边界、6px 圆角，分段页签与描边状态标签。'},
+  material:{name:'Material',hint:'胶囊按钮 · 底线输入',description:'实底胶囊按钮、填充式底线输入、下划线页签与轻投影。'},
+  soft:{name:'Soft UI',hint:'柔和浮面 · 大圆角',description:'16px 圆角、无框输入、柔和投影与浮起的选中页签。'},
+  brutalist:{name:'Neo Brutalist',hint:'方角粗框 · 硬阴影',description:'2px 粗边、零圆角、硬投影按钮和方块标签；按下时投影收回。'}
+};
+function chooseStyle(id) { appearance.style=id;applyStyle(); }
+function chooseLayout(id) {
+  const identity=visible[state.cursor]?.[0];
+  appearance.layout=id;state.view=layouts[id].view;applyStyle();render(identity);
+}
+function applyStyle() {
+  $('app').dataset.style=appearance.style;$('app').dataset.layout=appearance.layout;
+  $('layout').value=appearance.layout;$('style').value=appearance.style;
+  $('style-description').textContent=styles[appearance.style].description;
+  document.querySelectorAll('[data-style-choice]').forEach(button=>{const selected=button.dataset.styleChoice===appearance.style;button.setAttribute('aria-pressed',selected);button.textContent=selected?'已应用':'应用风格';});
+  $('list-view').textContent=appearance.layout==='paper'?'校对条目':appearance.layout==='focus'?'逐条审阅':appearance.layout==='terminal'?'差异流':'变更清单';
+}
+function initStyles() {
+  state.view=layouts[appearance.layout].view;
+  for(const [id,layout] of Object.entries(layouts)) {
+    const option=document.createElement('option');option.value=id;option.textContent=layout.name;$('layout').append(option);
+  }
+  for(const [id,style] of Object.entries(styles)) {
+    const option=document.createElement('option');option.value=id;option.textContent=style.name;$('style').append(option);
+    const sample=document.createElement('section');sample.className='style-preview visual-theme';sample.dataset.style=id;
+    sample.innerHTML='<h2>'+style.name+'</h2><p>'+style.hint.replace(' · ',' / ')+'</p><div class="sample-components"><div class="views" aria-hidden="true"><span class="sample-tab selected">原表</span><span class="sample-tab">变更</span></div><input type="search" value="生命药水" readonly aria-label="'+style.name+' 输入框样本，只读"><div class="sample-status"><span class="kind modified">修改</span><code>40 → 60</code></div><button class="primary-action" data-style-choice="'+id+'">应用风格</button></div>';
+    sample.querySelector('button').onclick=()=>chooseStyle(id);$('style-options').append(sample);
+  }
+  applyStyle();applyTheme();
+}
+function applyTokens(node, tokens, mode) {
+  for (const [role,value] of Object.entries(tokens)) node.style.setProperty('--ui-'+role,value);
+  const arrow='<svg xmlns="http://www.w3.org/2000/svg" width="12" height="8" viewBox="0 0 12 8"><path d="m2 2 4 4 4-4" fill="none" stroke="'+tokens.fg+'" stroke-width="2"/></svg>';
+  node.style.setProperty('--select-arrow','url("data:image/svg+xml,'+encodeURIComponent(arrow)+'")');
+  node.style.colorScheme=mode;
+}
+function applyTheme() {
+  const mode=appearance.mode==='system'?(systemTheme.matches?'dark':'light'):appearance.mode;
+  const palette=palettes[appearance.palette], tokens=palette[mode];
+  $('theme').value=appearance.mode;$('palette').value=appearance.palette;
+  $('app').dataset.theme=mode; $('app').dataset.palette=appearance.palette;
+  for(const node of document.querySelectorAll('.visual-theme')) {applyTokens(node,tokens,mode);node.dataset.theme=mode;}
+  $('theme-description').textContent=palette.description;
+  $('current-theme').textContent='当前配色：'+palette.name+' / '+(mode==='dark'?'深色':'浅色')+(appearance.mode==='system'?'，跟随系统':'');
+  $('theme-legend').replaceChildren();
+  for(const [role,label] of [['bg','表面'],['surface','分层'],['fg','正文'],['accent','操作'],['remove-bg','旧值'],['add-bg','新值']]) {
+    const span=document.createElement('span'), swatch=document.createElement('i');swatch.style.setProperty('--chip',tokens[role]);swatch.setAttribute('aria-hidden','true');
+    span.append(swatch,document.createTextNode(label+' '+tokens[role]));$('theme-legend').append(span);
+  }
+}
+function initPalettes() {
+  for(const [id,palette] of Object.entries(palettes)) {
+    const option=document.createElement('option');option.value=id;option.textContent=palette.name;$('palette').append(option);
+    const row=document.createElement('div');row.className='gallery-row';
+    for(const mode of ['light','dark']) {
+      const sample=document.createElement('section');sample.className='palette-sample';applyTokens(sample,palette[mode],mode);
+      sample.innerHTML='<h3>'+palette.name+' '+(mode==='light'?'浅色':'深色')+'</h3><div class="sample-head">生命药水 <code>100101</code></div><div class="pair"><div class="value before"><span class="version">旧</span><span>售价 <mark>40</mark></span></div><div class="value after"><span class="version">新</span><span>售价 <mark>60</mark></span></div></div><button type="button">预览此配色</button>';
+      sample.querySelector('button').onclick=()=>{appearance.palette=id;appearance.mode=mode;$('theme').value=mode;applyTheme();$('theme').focus();};row.append(sample);
+    }
+    $('theme-gallery').append(row);
+  }
+  systemTheme.addEventListener('change',()=>{if(appearance.mode==='system')applyTheme();});
+  applyTheme();
+}
+const fields = [ ['id','编号'], ['name','名称'], ['price','售卖价格'], ['quality','品质'], ['desc','描述信息'], ['precious','是否贵重'] ];
+const itemRows = [
+  ['100101','生命药水','modified',['100101','生命药水','40','2','立即恢复 30% 最大生命','0'],['100101','生命药水','60','2','立即恢复 40% 最大生命',null]],
+  ['100102','魔力药水','modified',['100102','魔力药水','80','2','恢复 20 点能量','0'],['100102','魔力药水','100','2','恢复 20 点能量',null]],
+  ['100103','祝福石','modified',['100103','祝福石','200','2','用于装备强化','1'],['100103','祝福石','200','3','用于装备强化',null]],
+  ['100104','复苏药剂','added',null,['100104','复苏药剂','150','3','恢复 60% 最大生命',null]],
+  ['100105','旧制恢复药','removed',['100105','旧制恢复药','20','1','恢复 10% 最大生命','0'],null],
+  ['100106','修复材料','schema',['100106','修复材料','10','1','用于修复装备','0'],['100106','修复材料','10','1','用于修复装备',null]]
+];
+const dropRows = [['1','掉落记录 1','modified',['1','100101','1'],['1','100101','2']],['2','掉落记录 2','unchanged',['2','100103','2'],['2','100103','2']]];
+const names = {modified:'修改', added:'新增', removed:'删除', schema:'仅字段变化', unchanged:'未变化'};
+const state = {sheet:'items', view:'list', field:'all', query:'', only:true, cursor:-1, scenario:'normal'};
+let visible = [];
+const escape = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+function data() {
+  const columns = state.sheet === 'items' ? fields : [['id','编号'],['itemId','道具编号'],['count','数量']];
+  const rows = structuredClone(state.sheet === 'items' ? itemRows : dropRows);
+  if (state.scenario === 'long' && state.sheet === 'items') {
+    const note = '\n使用条件：角色存活，且当前生命值未满。\n背包中的其他恢复道具不受影响；这段文字只用于测试长中文的阅读和展开。';
+    rows[0][3][4] += note; rows[0][4][4] += note + '\n新增说明：战斗中与战斗外都可使用。';
+  }
+  if (state.scenario === 'same') return {columns, rows:rows.filter(r=>r[4]).map(r=>[r[0],r[1],'unchanged',r[4],r[4]])};
+  return {columns, rows};
+}
+function filterRows(rows, columns) {
+  const fieldIndex = columns.findIndex(f=>f[0]===state.field);
+  const query = state.query.trim().toLocaleLowerCase();
+  return rows.filter(row => (!state.only || row[2]!=='unchanged') &&
+    (fieldIndex<0 || (row[3]?.[fieldIndex]??null)!==(row[4]?.[fieldIndex]??null)) &&
+    (!query || [row[0],row[1],...(row[3]||[]),...(row[4]||[])].some(v=>String(v??'').toLocaleLowerCase().includes(query))));
+}
+function marked(value, other) {
+  if (value===null || value===undefined) return '<span class="muted">不存在</span>';
+  if (value==='') return '<span class="muted">空值</span>';
+  const text = escape(value);
+  if (other==null || value===other) return text;
+  const a=Array.from(value), b=Array.from(other); let start=0,end=0;
+  while(start<a.length && start<b.length && a[start]===b[start]) start++;
+  while(end<a.length-start && end<b.length-start && a[a.length-end-1]===b[b.length-end-1]) end++;
+  return escape(a.slice(0,start).join(''))+'<mark>'+escape(a.slice(start,a.length-end).join(''))+'</mark>'+escape(end?a.slice(-end).join(''):'');
+}
+function valueLine(value, other, side, label=true, full=false) {
+  let text = marked(value,other);
+  if (!full && value!=null && value.length>85) text = '<details class="long-value"><summary>'+escape(value.slice(0,28))+'… 展开全文</summary><p>'+text+'</p></details>';
+  return '<div class="value '+side+'">'+(label?'<span class="version">'+(side==='before'?'旧':'新')+'</span>':'')+'<div class="text">'+text+'</div></div>';
+}
+function pair(row,index) {
+  const a=row[3]?.[index]??null, b=row[4]?.[index]??null;
+  if (row[2]==='added') return valueLine(b,null,'after');
+  if (row[2]==='removed') return valueLine(a,null,'before');
+  if (a===b) return '<span class="steady">'+(a==null?'不存在':escape(a))+'</span>';
+  return '<div class="pair">'+valueLine(a,b,'before')+valueLine(b,a,'after')+'</div>';
+}
+function rowHeading(row) { return '<span class="kind '+row[2]+'">'+names[row[2]]+'</span><strong>'+escape(row[1])+'</strong><code>id '+escape(row[0])+'</code>'; }
+function renderGrid(columns,indexes) {
+  return '<table class="grid'+(state.field==='all'?'':' filtered')+'"><caption class="sr-only">旧版本到新版本的原表对照</caption><thead><tr><th scope="col" class="identity">记录</th>'+indexes.map(i=>'<th scope="col" class="field-'+columns[i][0]+'">'+columns[i][1]+'<small><code>'+columns[i][0]+'</code></small></th>').join('')+'</tr></thead><tbody>'+visible.map((row,n)=>'<tr data-record="'+n+'"><th scope="row" class="identity">'+rowHeading(row)+'</th>'+indexes.map(i=>'<td class="field-'+columns[i][0]+(['price','quality','count'].includes(columns[i][0])?' number':'')+'">'+pair(row,i)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+}
+function renderList(columns,indexes) {
+  return '<table class="list"><caption class="sr-only">按记录分组的字段变化</caption><thead><tr><th scope="col">字段</th><th scope="col">旧值</th><th scope="col">新值</th></tr></thead><tbody>'+visible.map((row,n)=>{
+    let selected=indexes.filter(i=>row[2]==='added'||row[2]==='removed'||(row[3]?.[i]??null)!==(row[4]?.[i]??null));
+    if (row[2]==='unchanged') selected=indexes;
+    return '<tr class="record-group" data-record="'+n+'"><th colspan="3" scope="rowgroup"><span class="'+row[2]+'">'+names[row[2]]+'</span> '+escape(row[1])+'<code>'+escape(row[0])+'</code></th></tr>'+selected.map(i=>'<tr><th scope="row">'+columns[i][1]+'<small><code>'+columns[i][0]+'</code></small></th><td>'+valueLine(row[3]?.[i]??null,row[4]?.[i]??null,'before',false)+'</td><td>'+valueLine(row[4]?.[i]??null,row[3]?.[i]??null,'after',false)+'</td></tr>').join('');
+  }).join('')+'</tbody></table>';
+}
+function changedFields(row,indexes) {
+  return row[2]==='unchanged'||row[2]==='added'||row[2]==='removed'?indexes:indexes.filter(i=>(row[3]?.[i]??null)!==(row[4]?.[i]??null));
+}
+function fieldLabel(columns,i) {return '<div class="field-label"><strong>'+columns[i][1]+'</strong><code>'+columns[i][0]+'</code></div>';}
+function fullPair(row,i) {
+  if(row[2]==='added')return valueLine(row[4]?.[i]??null,null,'after',true,true);
+  if(row[2]==='removed')return valueLine(row[3]?.[i]??null,null,'before',true,true);
+  return '<div class="pair">'+valueLine(row[3]?.[i]??null,row[4]?.[i]??null,'before',true,true)+valueLine(row[4]?.[i]??null,row[3]?.[i]??null,'after',true,true)+'</div>';
+}
+function renderProof(columns,indexes) {
+  return '<div class="proof-document">'+visible.map((row,n)=>'<article class="proof-record" data-record="'+n+'"><header><h2>'+escape(row[1])+'</h2><code>id '+escape(row[0])+'</code><span class="kind '+row[2]+'">'+names[row[2]]+'</span></header>'+changedFields(row,indexes).map(i=>'<div class="proof-field">'+fieldLabel(columns,i)+'<div class="proof-values">'+fullPair(row,i)+'</div></div>').join('')+'</article>').join('')+'</div>';
+}
+function renderFocus(columns,indexes) {
+  const row=visible[state.cursor];
+  return '<div class="focus-workspace"><nav class="record-queue" aria-label="筛选后的记录">'+visible.map((r,n)=>'<button class="queue-item" data-select-record="'+n+'" aria-pressed="'+(n===state.cursor)+'"><strong>'+escape(r[1])+'</strong><code>'+escape(r[0])+'</code><span class="kind '+r[2]+'">'+names[r[2]]+'</span></button>').join('')+'</nav><section class="focus-detail" aria-label="当前记录详情"><header><div class="detail-status"><span class="'+row[2]+'">'+names[row[2]]+'</span><span>'+(state.cursor+1)+' / '+visible.length+'</span></div><h2>'+escape(row[1])+'</h2><code>id '+escape(row[0])+'</code></header>'+changedFields(row,indexes).map(i=>'<div class="focus-field">'+fieldLabel(columns,i)+'<div class="focus-values">'+valueLine(row[3]?.[i]??null,row[4]?.[i]??null,'before')+valueLine(row[4]?.[i]??null,row[3]?.[i]??null,'after')+'</div></div>').join('')+'</section></div>';
+}
+function renderTerminal(columns,indexes) {
+  return '<div class="patch-stream">'+visible.map((row,n)=>'<article class="terminal-record" data-record="'+n+'"><header><code>id/'+escape(row[0])+'</code><h2>'+escape(row[1])+'</h2><span class="kind '+row[2]+'">'+names[row[2]]+'</span></header>'+changedFields(row,indexes).map(i=>'<div class="patch-field"><div class="field-label"><code>'+columns[i][0]+'</code><span>'+columns[i][1]+'</span></div><div class="patch-values">'+fullPair(row,i)+'</div></div>').join('')+'</article>').join('')+'</div>';
+}
+function isFocus() {return appearance.layout==='focus'&&state.view==='list';}
+function refreshFocus() {
+  const {columns}=data(),indexes=columns.map((_,i)=>i).filter(i=>state.field==='all'||columns[i][0]===state.field);
+  const previous=$('content').querySelector('.record-queue'),left=previous.scrollLeft,top=previous.scrollTop;
+  $('content').innerHTML=renderFocus(columns,indexes);
+  const queue=$('content').querySelector('.record-queue');queue.scrollLeft=left;queue.scrollTop=top;
+  $('content').scrollTop=0;
+  updateNavigation();
+}
+function render(preserveIdentity) {
+  const {columns,rows}=data(), unavailable=['loading','error'].includes(state.scenario);
+  visible=unavailable?[]:filterRows(rows,columns);state.cursor=preserveIdentity?visible.findIndex(r=>r[0]===preserveIdentity):-1;
+  if(isFocus()&&visible.length&&state.cursor<0)state.cursor=0;
+  $('grid-view').setAttribute('aria-pressed',state.view==='grid'); $('list-view').setAttribute('aria-pressed',state.view==='list');
+  for (const id of ['sheet','field','only','query','grid-view','list-view']) $(id).disabled=unavailable;
+  $('summary').hidden=unavailable; $('schema').hidden=unavailable||state.sheet!=='items'||state.scenario==='same';
+  const counts=Object.fromEntries(Object.keys(names).map(k=>[k,rows.filter(r=>r[2]===k).length]));
+  $('summary').innerHTML='<span class="muted">当前表全部变化</span>'+['modified','added','removed'].map(k=>'<span class="'+k+'">'+names[k]+' <strong>'+counts[k]+'</strong></span>').join('')+(counts.schema?'<span>仅字段变化 <strong>'+counts.schema+'</strong></span>':'');
+  $('results').textContent=unavailable?(state.scenario==='loading'?'正在读取演示快照…':'演示快照未载入'):'显示 '+visible.length+' / '+rows.length+' 条记录';
+  $('footer').textContent='已载入 2 张表；当前 '+(state.sheet==='items'?'道具表':'掉落表')+'；按 id 对齐';
+  const filtered=state.field!=='all'||state.query.trim()!=='';
+  $('filter-note').hidden=unavailable||!filtered;
+  $('filter-text').textContent=state.field!=='all'?'当前仅显示所选字段涉及的记录。其他字段的变化仍保留在当前表统计中。':'搜索会缩小记录范围，当前表统计保持不变。';
+  const indexes=columns.map((_,i)=>i).filter(i=>state.field==='all'||columns[i][0]===state.field);
+  if(state.scenario==='loading') $('content').innerHTML='<div class="skeleton" role="status" aria-label="正在读取数据"><span></span><span></span><span></span><span></span></div>';
+  else if(state.scenario==='error') $('content').innerHTML='<div class="empty" role="alert"><h2>没有读到新版本</h2><p>演示：文件不可用。请确认文件已保存，再重新发起比较。</p><button data-recover>返回正常演示</button></div>';
+  else if(!visible.length) $('content').innerHTML='<div class="empty"><h2>'+(filtered?'没有匹配的记录':'当前表没有变化')+'</h2><p>'+(filtered?'清除筛选后，可重新查看当前表。':'可以显示未变化记录，核对原表内容。')+'</p><button data-empty>'+ (filtered?'清除筛选':'显示全部记录')+'</button></div>';
+  else $('content').innerHTML=state.view==='grid'?renderGrid(columns,indexes):appearance.layout==='paper'?renderProof(columns,indexes):appearance.layout==='focus'?renderFocus(columns,indexes):appearance.layout==='terminal'?renderTerminal(columns,indexes):renderList(columns,indexes);
+  document.querySelectorAll('[data-record]').forEach(el=>el.classList.toggle('current',Number(el.dataset.record)===state.cursor));
+  $('content').setAttribute('aria-busy',state.scenario==='loading'); updateNavigation();
+  if(preserveIdentity&&state.cursor>=0&&!isFocus())navigate(0);
+}
+function updateNavigation() {
+  $('previous').disabled=state.cursor<=0; $('next').disabled=!visible.length||state.cursor>=visible.length-1;
+  $('position').textContent=state.cursor<0?'尚未定位':(isFocus()?'当前 ':'定位 ')+(state.cursor+1)+' / '+visible.length;
+  const queue=$('content').querySelector('.record-queue'),selected=queue?.querySelector('[aria-pressed="true"]');
+  if(selected) {
+    const viewport=queue.getBoundingClientRect(),item=selected.getBoundingClientRect();
+    queue.scrollLeft+=Math.min(0,item.left-viewport.left)+Math.max(0,item.right-viewport.right);
+    queue.scrollTop+=Math.min(0,item.top-viewport.top)+Math.max(0,item.bottom-viewport.bottom);
+  }
+}
+function navigate(step) {
+  state.cursor=Math.max(0,Math.min(visible.length-1,state.cursor+step));
+  if(isFocus()){refreshFocus();return;}
+  document.querySelectorAll('[data-record]').forEach(el=>el.classList.toggle('current',Number(el.dataset.record)===state.cursor));
+  const row=document.querySelector('[data-record="'+state.cursor+'"]');
+  if(row) {const container=$('content'),head=container.querySelector('thead');container.scrollTop+=row.getBoundingClientRect().top-container.getBoundingClientRect().top-(head?head.getBoundingClientRect().height:12);}
+  updateNavigation();
+}
+function setFields() {
+  $('field').innerHTML='<option value="all">全部字段</option>'+data().columns.map(f=>'<option value="'+f[0]+'">'+f[1]+'</option>').join('');
+}
+function resetFilters() { state.field='all';state.query='';$('field').value='all';$('query').value=''; render(); }
+$('sheet').onchange=e=>{state.sheet=e.target.value;state.field='all';state.query='';$('query').value='';setFields();render();};
+$('field').onchange=e=>{state.field=e.target.value;render();};
+$('query').oninput=e=>{if(!e.isComposing){state.query=e.target.value;render();}};
+$('query').oncompositionend=e=>{state.query=e.target.value;render();};
+$('only').onchange=e=>{state.only=e.target.checked;render();};
+$('grid-view').onclick=()=>{state.view='grid';render(visible[state.cursor]?.[0]);}; $('list-view').onclick=()=>{state.view='list';render(visible[state.cursor]?.[0]);};
+$('reset').onclick=()=>{resetFilters();$('query').focus({preventScroll:true});}; $('previous').onclick=()=>navigate(-1); $('next').onclick=()=>navigate(1);
+$('style').onchange=e=>chooseStyle(e.target.value);
+$('layout').onchange=e=>chooseLayout(e.target.value);
+$('palette').onchange=e=>{appearance.palette=e.target.value;applyTheme();};
+$('theme').onchange=e=>{appearance.mode=e.target.value;applyTheme();};
+$('scenario').onchange=e=>{state.scenario=e.target.value;resetFilters();};
+$('content').onclick=e=>{
+  const record=e.target.closest('[data-select-record]');
+  if(record){state.cursor=Number(record.dataset.selectRecord);refreshFocus();$('content').querySelector('[data-select-record="'+state.cursor+'"]').focus({preventScroll:true});return;}
+  if(e.target.closest('[data-recover]')){state.scenario='normal';$('scenario').value='normal';render();$('query').focus({preventScroll:true});return;}
+  if(e.target.closest('[data-empty]')){
+    if(state.field!=='all'||state.query.trim())resetFilters();else{state.only=false;$('only').checked=false;render();}
+    $('query').focus({preventScroll:true});
+  }
+};
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&$('settings').open){$('settings').open=false;$('settings').querySelector('summary').focus({preventScroll:true});e.preventDefault();}
+});
+document.addEventListener('click',e=>{if($('settings').open&&!$('settings').contains(e.target))$('settings').open=false;});
+initPalettes();initStyles();setFields();render();
+</script>
+</body>
+</html>

@@ -94,7 +94,7 @@ func TestNativeTableAndViewMatchJavaScript(t *testing.T) {
 	if err != nil {
 		t.Skip("Node is unavailable; differential plugin comparison skipped")
 	}
-	states := []viewState{{OnlyFields: true}, {OnlyFields: true, OnlyChanges: true}, {OnlyFields: true, Query: "name204", Page: 99}, {OnlyFields: false, Page: 99}, {Query: "TRUE"}, {Query: "9007199"}, {Query: "<>&"}, {Page: -5}, {Query: "i\u0307"}, {Query: "ος"}}
+	states := []viewState{{Field: "rare", OnlyChanges: true, OnlyFields: true, Page: 99}, {Field: "v", OnlyFields: true}, {Field: "missing"}, {OnlyFields: true}, {OnlyFields: true, OnlyChanges: true}, {OnlyFields: true, Query: "name204", Page: 99}, {OnlyFields: false, Page: 99}, {Query: "TRUE"}, {Query: "9007199"}, {Query: "<>&"}, {Page: -5}, {Query: "i\u0307"}, {Query: "ος"}}
 	fixtures := []nativeParityFixture{
 		{Name: "empty"},
 		{Name: "empty separators", Before: "id,name,x\n1,A\n,,\n\n2,B,", After: "id,name,x\n1,A,,\n2,C"},

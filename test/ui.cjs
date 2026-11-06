@@ -9,6 +9,7 @@ const { readTable } = require('../src/csv');
 const { compareTables } = require('../src/diff');
 const { readWorkbook, worksheetTable } = require('../src/xlsx');
 const { workbook } = require('./xlsx-fixtures');
+const { reviewInteractions, reviewPagination } = require('./review-interactions.cjs');
 const root = path.resolve(__dirname, '..');
 const moduleStub = { exports: {} };
 let origin;
@@ -122,7 +123,7 @@ const server = http.createServer((request, response) => {
     const emptyIds = compareTables(readTable(movaHeader + '1,正常,old\n,停用,same\n,停用,same'), readTable(movaHeader + '1,正常,new\n,停用,same\n,停用,same'));
     await send({ ...payload, title: 'Mova 空 ID 检查', revision: 5, result: emptyIds });
     assert.equal(await page.getByRole('alert').isVisible(), false);
-    assert.ok((await page.locator('#notice').innerText()).includes('Mova 无主键行：旧 2 / 新 2 条'));
+    assert.ok((await page.locator('#review-notice').innerText()).includes('Mova 无主键行：旧 2 / 新 2 条'));
     assert.equal(await page.locator('tbody tr').count(), 1);
     await page.getByLabel('仅看变动记录', { exact: true }).uncheck();
     assert.equal(await page.locator('tbody tr').count(), 3);
@@ -215,6 +216,7 @@ const server = http.createServer((request, response) => {
     const sparseBefore = 'id,v,rare,other\n' + Array.from({ length: 205 }, (_, i) => `${i},old,,same`).join('\n');
     const sparseAfter = 'id,v,rare,other\n' + Array.from({ length: 205 }, (_, i) => `${i},new,${i === 204 ? 'only-last' : ''},same`).join('\n');
     await send({ ...payload, title: '跨页字段并集固定', revision: 12, result: compareTables(readTable(sparseBefore), readTable(sparseAfter)) });
+    await reviewPagination(page);
     assert.deepEqual(await headers(), ['v', 'rare']);
     await page.getByRole('button', { name: '下一页 →' }).click();
     await page.getByRole('button', { name: '下一页 →' }).click();
@@ -312,6 +314,8 @@ const server = http.createServer((request, response) => {
     assert.equal(await changedEnum.locator('td').last().locator('.after > span:last-child').textContent(), '2');
     assert.equal(await page.locator('tbody tr').count(), 3);
     await page.screenshot({ path: path.join(root, 'dist/gridiff-mova-vertical.png'), fullPage: true });
+    await send({ ...payload, title: '正式阅读布局验收', revision: 18 });
+    await reviewInteractions(page);
     assert.deepEqual(errors, []);
     console.log('Gridiff UI passed: both views, full cell text, viewport layout, keyboard scrolling, search, pagination, safe text, errors, light/dark screenshots.');
   } finally { await browser.close(); server.close(); }

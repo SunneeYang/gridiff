@@ -60,9 +60,11 @@ type phaseMetric struct {
 type preferences struct {
 	Mode    string `json:"mode"`
 	Palette string `json:"palette"`
+	Style   string `json:"style"`
+	Layout  string `json:"layout"`
 }
 
-var defaultPreferences = preferences{Mode: "system", Palette: "default"}
+var defaultPreferences = preferences{Mode: "system", Palette: "default", Style: "material", Layout: "matrix"}
 
 type serverOptions struct {
 	SheetSelection sheetSelection
@@ -347,7 +349,9 @@ func readObject(w http.ResponseWriter, r *http.Request, limit int64) (map[string
 
 func validPreferences(p preferences) bool {
 	return (p.Mode == "system" || p.Mode == "light" || p.Mode == "dark") &&
-		(p.Palette == "default" || p.Palette == "github" || p.Palette == "catppuccin" || p.Palette == "solarized" || p.Palette == "nord")
+		(p.Palette == "default" || p.Palette == "github" || p.Palette == "catppuccin" || p.Palette == "solarized" || p.Palette == "nord") &&
+		(p.Style == "github" || p.Style == "material" || p.Style == "soft" || p.Style == "brutalist") &&
+		(p.Layout == "matrix" || p.Layout == "paper" || p.Layout == "focus" || p.Layout == "terminal")
 }
 
 func loadPreferences(file string) preferences {
@@ -357,7 +361,7 @@ func loadPreferences(file string) preferences {
 	}
 	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, 4097))
-	var p preferences
+	p := defaultPreferences
 	if err != nil || len(data) > 4096 || json.Unmarshal(data, &p) != nil || !validPreferences(p) {
 		return defaultPreferences
 	}
@@ -443,8 +447,16 @@ func (s *comparisonServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if route == "preferences" {
-		var p preferences
-		if len(object) != 2 || json.Unmarshal(object["mode"], &p.Mode) != nil || json.Unmarshal(object["palette"], &p.Palette) != nil || !validPreferences(p) {
+		p := loadPreferences(s.configPath)
+		fields := map[string]*string{"mode": &p.Mode, "palette": &p.Palette, "style": &p.Style, "layout": &p.Layout}
+		valid := object["mode"] != nil && object["palette"] != nil
+		for key, raw := range object {
+			target, known := fields[key]
+			if !known || string(raw) == "null" || json.Unmarshal(raw, target) != nil {
+				valid = false
+			}
+		}
+		if !valid || !validPreferences(p) {
 			failHTTP(w, 400, "主题设置无效")
 			return
 		}

@@ -69,7 +69,7 @@
       if (wantedGeneration <= loadedGeneration) return;
       reloadRequested = true; commands.length = 0;
       if (loadedGeneration) {
-        view = { ...view, query: '', page: 0 }; viewVersion++;
+        view = { ...view, query: '', field: '', page: 0 }; viewVersion++;
         emit({ type: 'snapshot-replacing' });
       }
       document.querySelector('dialog')?.remove();
@@ -92,7 +92,7 @@
           try { settings = JSON.parse(sessionStorage.getItem(`${storageKey}:comparison`)); } catch { /* Ignore invalid preferences. */ }
           if (settings?.generation !== snapshot.generation) {
             settings = undefined;
-            if (fetchedView === viewVersion) { view = { ...view, query: '', page: 0 }; emit({ type: 'snapshot-replacing' }); }
+            if (fetchedView === viewVersion) { view = { ...view, query: '', field: '', page: 0 }; emit({ type: 'snapshot-replacing' }); }
           }
           command = { action: 'load', generation: snapshot.generation, settings, view };
           loadedGeneration = snapshot.generation;

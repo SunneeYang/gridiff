@@ -7,7 +7,7 @@ const { startComparisonServer } = require('./browser-server.cjs');
 
 const root = path.resolve(__dirname, '..');
 const palettes = ['default', 'github', 'catppuccin', 'solarized', 'nord'];
-let saved = { mode: 'system', palette: 'default' }, failSave = false;
+let saved = { mode: 'system', palette: 'default' }, failSave = false, preferenceGate;
 
 (async () => {
   assert.ok(process.env.CODEX_AGENT_TMP, 'Run with agent-tmp-run');
@@ -26,6 +26,7 @@ let saved = { mode: 'system', palette: 'default' }, failSave = false;
         if (failSave) { await route.fulfill({ status: 500, contentType: 'application/json', body: '{}' }); return; }
         saved = route.request().postDataJSON();
       }
+      if (route.request().method() === 'GET' && preferenceGate) await preferenceGate;
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify(saved) });
     });
     await page.goto(urls[0]);
@@ -33,6 +34,7 @@ let saved = { mode: 'system', palette: 'default' }, failSave = false;
     assert.equal(await page.locator('html').getAttribute('data-appearance'), 'dark');
     await page.emulateMedia({ colorScheme: 'light' });
     await page.waitForFunction(() => document.documentElement.dataset.appearance === 'light');
+    await page.locator('#settings > summary').click();
     await page.getByLabel('明暗', { exact: true }).selectOption('dark');
     const savedPalette = page.waitForResponse(response => response.url().endsWith('/preferences') && response.request().method() === 'POST' && response.request().postDataJSON().palette === 'catppuccin');
     await page.getByLabel('配色', { exact: true }).selectOption('catppuccin');
@@ -47,6 +49,7 @@ let saved = { mode: 'system', palette: 'default' }, failSave = false;
     assert.equal(await page.locator('html').getAttribute('data-appearance'), 'dark');
     await page.reload();
     await page.waitForFunction(() => document.documentElement.dataset.palette === 'catppuccin');
+    await page.locator('#settings > summary').click();
     await page.getByLabel('明暗', { exact: true }).selectOption('system');
     await page.waitForFunction(() => document.documentElement.dataset.appearance === 'light');
     await page.emulateMedia({ colorScheme: 'dark' });
@@ -82,6 +85,42 @@ let saved = { mode: 'system', palette: 'default' }, failSave = false;
       await page.setViewportSize({ width, height: 900 });
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `no horizontal page overflow at ${width}`);
     }
+    // Restore preferences while the initial comparison is in flight; the latest view must win.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.evaluate(() => sessionStorage.clear());
+    saved = { mode: 'light', palette: 'github', style: 'soft', layout: 'focus' };
+    let releasePreferences, releaseComparison;
+    preferenceGate = new Promise(resolve => { releasePreferences = resolve; });
+    const comparisonGate = new Promise(resolve => { releaseComparison = resolve; });
+    let firstCompare = true;
+    await page.route('**/compare', async route => {
+      if (firstCompare) { firstCompare = false; await comparisonGate; }
+      await route.continue();
+    });
+    const comparing = page.waitForRequest(request => request.url().endsWith('/compare'));
+    await page.reload(); await comparing;
+    releasePreferences(); preferenceGate = null;
+    await page.waitForFunction(() => document.documentElement.dataset.layout === 'focus');
+    releaseComparison();
+    await page.locator('tbody tr').first().waitFor();
+    assert.equal(await page.locator('#grid-tab').getAttribute('aria-pressed'), 'true', 'restoring focus layout never selects list view');
+    await page.locator('#grid-tab').click(); await page.locator('tbody tr').first().waitFor();
+    await page.reload(); await page.locator('tbody tr').first().waitFor();
+    await page.waitForFunction(() => document.documentElement.dataset.layout === 'focus');
+    assert.equal(await page.locator('#grid-tab').getAttribute('aria-pressed'), 'true', 'saved manual grid view survives layout restoration');
+    assert.equal(await page.locator('html').getAttribute('data-style'), 'soft');
+    await page.locator('#list-tab').click(); await page.locator('.focus-workspace').waitFor();
+    saved = { ...saved, layout: 'matrix' };
+    await page.reload(); await page.locator('.change-record').first().waitFor();
+    await page.waitForFunction(() => document.documentElement.dataset.layout === 'matrix');
+    assert.equal(await page.locator('#list-tab').getAttribute('aria-pressed'), 'true', 'restoring matrix layout preserves saved list view');
+    await page.locator('#grid-tab').click(); await page.locator('tbody tr').first().waitFor();
+    await page.locator('#search').fill('生命');
+    await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 1);
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'search', 'search remains focused through native request');
+    await page.locator('#search').fill('');
+    await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 3);
+    await page.locator('#settings > summary').click();
     failSave = true;
     await page.getByLabel('配色', { exact: true }).selectOption('solarized');
     await page.locator('#theme-save-status').filter({ hasText: '未能保存' }).waitFor();

@@ -94,6 +94,7 @@ type viewState struct {
 	OnlyChanges bool   `json:"onlyChanges"`
 	OnlyFields  bool   `json:"onlyFields"`
 	Query       string `json:"query"`
+	Field       string `json:"field,omitempty"`
 	Page        int    `json:"page"`
 }
 

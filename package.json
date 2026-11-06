@@ -2,7 +2,7 @@
   "name": "gridiff",
   "displayName": "Gridiff — Visual Table Diff",
   "description": "看清每一个单元格的变化。按主键和字段对齐 CSV、XLSX，可配置工作表读取范围，支持 Mova 多行表头。",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "publisher": "sunneeyang",
   "repository": {
     "type": "git",

@@ -800,14 +800,21 @@ func selectNativeView(model *diffModel, state viewState) ([]diffRow, pageInfo) {
 		}
 	}
 	fields := make([]int, 0, len(model.Fields))
-	for i := range model.Fields {
-		if !state.OnlyFields || changed[i] {
+	fieldIndex := -1
+	for i, field := range model.Fields {
+		if field.Name == state.Field {
+			fieldIndex = i
+		}
+		if state.Field != "" && field.Name == state.Field || state.Field == "" && (!state.OnlyFields || changed[i]) {
 			fields = append(fields, i)
 		}
 	}
 	query := nativeLower(state.Query)
 	filtered := make([]int, 0, len(model.Rows))
 	for i, row := range model.Rows {
+		if state.Field != "" && (fieldIndex < 0 || !row.Cells[fieldIndex].Changed) {
+			continue
+		}
 		if state.OnlyChanges && row.Status == "unchanged" && !row.Moved {
 			schemaChanged := false
 			for j, cell := range row.Cells {

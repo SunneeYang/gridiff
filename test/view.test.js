@@ -40,3 +40,21 @@ test('wide projections clamp page size and page number without dropping records'
   assert.equal(selected.pageInfo.page, 2);
   assert.equal(selected.rows.length, 6);
 });
+
+test('field filtering scans all records, includes additions/deletions and schema-only changes', () => {
+  const before = 'id,name,value,rare\n' + Array.from({ length: 205 }, (_, i) => `${i},name${i},same,old`).join('\n');
+  const after = before.replace('0,name0,same', '0,name0,new').replace('204,name204,same,old', '204,name204,same,new');
+  const model = compareTables(readTable(before), readTable(after));
+  const rare = selectView(model, { ...state, field: 'rare', onlyChanges: true, page: 99 });
+  assert.deepEqual(rare.rows.map(row => row.identity), ['204']);
+  assert.deepEqual(rare.pageInfo.fieldIndexes, [3]);
+  assert.equal(rare.pageInfo.page, 0);
+  assert.equal(rare.pageInfo.totalRows, 205);
+  assert.equal(model.counts.modified, 2, 'global counts are not filtered');
+  assert.equal(selectView(model, { ...state, field: 'value' }).rows.length, 1, 'field changes invalidate cached filter');
+  assert.equal(selectView(model, { ...state, field: 'missing' }).rows.length, 0);
+  const schema = compareTables(readTable('id,removed\n1,\n2,old'), readTable('id,added\n1,\n3,'));
+  const selected = selectView(schema, { ...state, onlyChanges: true, field: 'removed' });
+  assert.deepEqual(selected.rows.map(row => row.identity).sort(), ['1', '2']);
+  assert.deepEqual(selected.pageInfo.fieldIndexes, [2]);
+});

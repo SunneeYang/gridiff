@@ -18,14 +18,16 @@
       }
       prepared = { changed, query: null }; cache.set(model, prepared);
     }
-    const query = state.query.toLocaleLowerCase();
-    if (prepared.query !== query || prepared.onlyChanges !== state.onlyChanges) {
+    const query = state.query.toLocaleLowerCase(), field = state.field || '';
+    const fieldIndex = field ? model.fields.findIndex(item => item.name === field) : -1;
+    if (prepared.query !== query || prepared.onlyChanges !== state.onlyChanges || prepared.field !== field) {
       prepared.filtered = model.rows.filter(row =>
+        (!field || fieldIndex >= 0 && row.cells[fieldIndex].changed) &&
         (!state.onlyChanges || row.status !== 'unchanged' || row.moved || row.cells.some((cell, i) => cell.changed && (!model.fields[i].before || !model.fields[i].after))) &&
         (!query || row.identity.toLocaleLowerCase().includes(query) || row.cells.some(c => [c.before, c.after, c.beforeMeta?.formula, c.afterMeta?.formula, c.beforeMeta?.raw, c.afterMeta?.raw].some(v => v != null && String(v).toLocaleLowerCase().includes(query)))));
-      prepared.query = query; prepared.onlyChanges = state.onlyChanges;
+      prepared.query = query; prepared.onlyChanges = state.onlyChanges; prepared.field = field;
     }
-    const fieldIndexes = model.fields.map((_, i) => i).filter(i => !state.onlyFields || prepared.changed.has(i));
+    const fieldIndexes = model.fields.map((_, i) => i).filter(i => field ? i === fieldIndex : !state.onlyFields || prepared.changed.has(i));
     const pageSize = Math.max(1, Math.min(100, Math.floor(3000 / Math.max(1, fieldIndexes.length))));
     const pages = Math.max(1, Math.ceil(prepared.filtered.length / pageSize));
     const page = Math.max(0, Math.min(state.page, pages - 1));

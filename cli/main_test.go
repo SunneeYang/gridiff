@@ -322,3 +322,42 @@ func TestSnapshotRoutesOnlyByExtension(t *testing.T) {
 		t.Fatal("XLSX validation was skipped", data, err)
 	}
 }
+
+func TestAppearancePreferencesMigrationAndValidation(t *testing.T) {
+	s := testServer(t, serverOptions{})
+	if err := os.MkdirAll(filepath.Dir(s.configPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(s.configPath, []byte(`{"mode":"dark","palette":"nord"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	p := loadPreferences(s.configPath)
+	if p.Mode != "dark" || p.Palette != "nord" || p.Style != "material" || p.Layout != "matrix" {
+		t.Fatal(p)
+	}
+	w := request(t, s, "POST", "preferences", `{"mode":"light","palette":"github","style":"soft","layout":"focus"}`, nil)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	w = request(t, s, "POST", "preferences", `{"mode":"dark","palette":"nord"}`, nil)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	p = loadPreferences(s.configPath)
+	if p.Style != "soft" || p.Layout != "focus" || p.Mode != "dark" {
+		t.Fatal("legacy client reset appearance", p)
+	}
+	for _, body := range []string{
+		`{"mode":"dark","palette":"nord","style":null}`, `{"mode":"dark","palette":"nord","layout":null}`,
+		`{"mode":"dark","palette":"nord","style":"unknown"}`, `{"mode":"dark","palette":"nord","layout":"unknown"}`,
+		`{"mode":"dark","palette":"nord","style":[]}`, `{"mode":null,"palette":"nord"}`,
+		`{"mode":"dark","palette":"nord","path":"elsewhere"}`,
+	} {
+		if response := request(t, s, "POST", "preferences", body, nil); response.Code != 400 {
+			t.Fatal(body, response.Code)
+		}
+	}
+	if loadPreferences(s.configPath) != p {
+		t.Fatal("rejected requests changed preferences")
+	}
+}
