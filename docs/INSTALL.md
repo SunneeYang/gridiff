@@ -1,6 +1,8 @@
 # Gridiff 安装与使用
 
-建议第一次使用的同事打开图文指南：下载源码根目录的 **安装与使用.html** 和 `docs/guide/` 资源目录后，双击 HTML。团队的 design 仓库已同步指南时，直接打开与 README 同级的 **gridiff/安装与使用.html**。
+第一次使用时，先从下表选择独立 CLI 或编辑器扩展；Agent 技能安装见 [Agent 安装说明](AGENT-INSTALL.md)。这些方式均可直接从公共发布页安装。
+
+使用团队分发目录时，也可打开离线 Fork 配置指南：下载源码根目录的 **安装与使用.html** 和 `docs/guide/` 资源目录后，双击 HTML。团队仓库已同步指南时，直接打开与 README 同级的 **gridiff/安装与使用.html**；该指南中的统一启动器路径针对团队分发目录，直接下载 CLI 的路径按下表配置。
 
 指南按系统和工具显示步骤，可复制参数、查看配图、回看快捷键。离线即可阅读；安装编辑器扩展需要联网。GitHub 中直接点 HTML 会显示源码，不会运行交互页面。
 
@@ -10,7 +12,8 @@
 
 | 你想在哪里查看 | 需要安装什么 | Fork 外部 Diff 工具 |
 | --- | --- | --- |
-| 默认浏览器（推荐团队成员） | 更新 design 仓库及 Git LFS 文件，不需编辑器或插件 | 自定义，选择 `gridiff/gridiff`；Windows 选择 `gridiff/gridiff.cmd`，参数 `$REMOTE $LOCAL` |
+| 默认浏览器（直接下载） | 从 [README 下载表](../README.md#下载独立-cli-与完整技能包) 选择对应平台 CLI ZIP 并解压，不需额外运行时 | 自定义，选择解压后的 `gridiff`；Windows 选择 `gridiff.exe`，参数 `$REMOTE $LOCAL` |
+| 默认浏览器（团队已分发） | 更新团队仓库及 Git LFS 文件，不需编辑器或插件 | 自定义，选择 `gridiff/gridiff`；Windows 选择 `gridiff/gridiff.cmd`，参数 `$REMOTE $LOCAL` |
 | VS Code | 安装 VS Code，在扩展面板搜索 `@id:sunneeyang.gridiff` 并安装 | 选择内置 **VSCode**，不手填参数 |
 | Cursor | 安装 Cursor，在其扩展面板搜索 `@id:sunneeyang.gridiff` 并安装 | 自定义，选择 Cursor 的命令行入口，参数 `--wait --diff $REMOTE $LOCAL` |
 

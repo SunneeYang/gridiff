@@ -2,7 +2,8 @@
 
 <p align="center">
   <strong>看清每一个单元格的变化。</strong><br>
-  在浏览器、VS Code 或 Cursor 中审阅 CSV 与 XLSX，也可通过 CLI 和 Agent 技能读取完整差异。
+  对比 Excel / CSV 的 Git 历史、本地修改或两份文件。<br>
+  在浏览器、VS Code、Cursor 中查看，也可以交给 Agent 分析。
 </p>
 
 <p align="center">
@@ -13,7 +14,9 @@
 
 <p align="center">
   <a href="#快速开始">快速开始</a> ·
+  <a href="#下载独立-cli-与完整技能包">下载</a> ·
   <a href="#给-agent-使用">Agent / CLI</a> ·
+  <a href="#主题与阅读布局">主题与布局</a> ·
   <a href="#配合-fork-使用">Fork 配置</a> ·
   <a href="docs/INSTALL.md">安装指南</a> ·
   <a href="docs/USAGE.md">使用手册</a>
@@ -21,12 +24,16 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/preview-dark.png">
-  <img src="docs/images/preview-light.png" alt="Gridiff 表格对比：火球伤害从 120 改为 150，闪电记录删除，治疗记录新增；旧值标红，新值标绿。" width="1080">
+  <img src="docs/images/preview-light.png" alt="Gridiff 0.1.18 原表对照：XLSX 中铁剑价格从 100 改为 120，法杖需求等级从 5 改为 8，木盾删除，皮甲新增。" width="1080">
 </picture>
 
-<p align="center"><sub>实际比较界面，使用虚构演示数据。新增、删除和修改在同一张表中展示。</sub></p>
+<p align="center"><sub>0.1.18 实际界面 · 虚构 XLSX 数据 · GitHub 组件风格与配色 · 精密矩阵布局</sub></p>
 
 Gridiff 按主键对齐记录、按字段名对齐列，让你直接看到“哪条记录的哪个字段，从什么值改成了什么值”。适合游戏配置、策划表和 Excel 工作簿审阅，比较过程只读，不改写源文件，也不上传表格数据。
+
+例如：**“看看装备表这次改了什么，有没有顺手改到不该改的地方。”** 你可以在 Fork 中选中本地修改或历史提交打开对比，也可以让 Agent 找出价格变化、意外的等级改动和整条记录的增删，再结合项目规则解释。
+
+**当前版本：0.1.18。** [更新记录](CHANGELOG.md) · [CLI / VSIX 发布页](https://github.com/SunneeYang/gridiff/releases/tag/v0.1.18) · [完整 Agent 技能发布页](https://github.com/SunneeYang/gridiff/releases/tag/skill-v0.1.18)
 
 ## 为什么用 Gridiff
 
@@ -44,16 +51,48 @@ Gridiff 按主键对齐记录、按字段名对齐列，让你直接看到“哪
 | --- | --- |
 | **VS Code** | 在扩展面板搜索 `@id:sunneeyang.gridiff`，安装 **Gridiff — Visual Table Diff**，然后打开 CSV 或 XLSX 差异。 |
 | **Cursor** | 在 Cursor 扩展面板搜索同一扩展 ID；搜索不到时，从 [Open VSX](https://open-vsx.org/extension/sunneeyang/gridiff) 下载 VSIX，通过 **Install from VSIX…** 安装。 |
-| **浏览器 / 策划库自带程序** | 团队仓库已有 `gridiff/` 时，更新仓库及 Git LFS 文件，然后双击其中与 README 同级的 **安装与使用.html**，按向导配置 Fork。无需安装编辑器或额外运行时。 |
-| **Agent / 脚本** | 使用对应平台的完整技能包或独立 CLI。Agent 从下方[调用流程](#给-agent-使用)开始；技能包内已携带 CLI，无需额外运行时。 |
+| **浏览器 / 独立 CLI** | 下载下方对应平台的 **CLI ZIP**，解压后传入两份文件，或配置为 Fork 外部对比工具。无需编辑器、Node.js 或 Go。 |
+| **Agent** | 下载对应平台的 **完整技能 ZIP**，其中已包含 CLI；可直接把下方[安装提示词](#给-agent-使用)发给 Agent。 |
 
 确认扩展发布者为 **sunneeyang**。编辑器扩展无需安装独立 Gridiff 程序；仅打开单个文件不会启动对比。
 
-> **第一次使用？** 从 [图文安装说明](docs/INSTALL.md) 开始。仓库根目录的 [安装与使用.html](安装与使用.html) 可离线按系统和工具展示步骤，支持复制参数、明暗切换与配色选择。下载时保留 `docs/guide/` 资源目录；GitHub 直接打开 HTML 会显示源码。
+> **第一次使用？** 从下方下载表或 [安装说明](docs/INSTALL.md) 开始。使用团队分发目录时，还可打开 [离线 Fork 配置指南](安装与使用.html)，按系统和工具查看步骤、复制参数。单独下载指南时须保留 `docs/guide/` 资源目录；GitHub 直接打开 HTML 会显示源码。
 
-独立程序的源码构建与团队仓库分发见 [开发文档](DEVELOPMENT.md#独立程序)。源码仓库不直接携带可执行程序。
+团队仓库已经提供 `gridiff/` 时，也可更新仓库及 Git LFS 文件后，打开其中的 **安装与使用.html**。公共下载和技能安装均可独立完成。源码构建与团队分发见 [开发文档](DEVELOPMENT.md#独立程序)。
+
+### 下载独立 CLI 与完整技能包
+
+以下为 **0.1.18** 的发布附件。按程序实际运行的系统和 CPU 选择；Agent 在远程主机、容器或 WSL 内执行时，以该环境为准。
+
+| 平台 | 独立 CLI | 完整 Agent 技能（内置 CLI） |
+| --- | --- | --- |
+| macOS Apple Silicon | [CLI ZIP](https://github.com/SunneeYang/gridiff/releases/download/v0.1.18/gridiff-darwin-arm64.zip) | [技能 ZIP](https://github.com/SunneeYang/gridiff/releases/download/skill-v0.1.18/gridiff-darwin-arm64.zip) |
+| macOS Intel | [CLI ZIP](https://github.com/SunneeYang/gridiff/releases/download/v0.1.18/gridiff-darwin-x64.zip) | [技能 ZIP](https://github.com/SunneeYang/gridiff/releases/download/skill-v0.1.18/gridiff-darwin-x64.zip) |
+| Linux ARM64 | [CLI ZIP](https://github.com/SunneeYang/gridiff/releases/download/v0.1.18/gridiff-linux-arm64.zip) | [技能 ZIP](https://github.com/SunneeYang/gridiff/releases/download/skill-v0.1.18/gridiff-linux-arm64.zip) |
+| Linux x64 | [CLI ZIP](https://github.com/SunneeYang/gridiff/releases/download/v0.1.18/gridiff-linux-x64.zip) | [技能 ZIP](https://github.com/SunneeYang/gridiff/releases/download/skill-v0.1.18/gridiff-linux-x64.zip) |
+| Windows x64 | [CLI ZIP](https://github.com/SunneeYang/gridiff/releases/download/v0.1.18/gridiff-windows-x64.zip) | [技能 ZIP](https://github.com/SunneeYang/gridiff/releases/download/skill-v0.1.18/gridiff-windows-x64.zip) |
+
+两个发布页分别提供 `SHA256SUMS.txt`。CLI ZIP 解压后直接得到 `gridiff`（Windows 为 `gridiff.exe`）；完整技能 ZIP 内是包含 `SKILL.md`、引用文档和 `bin/` 的 `gridiff/` 目录。GitHub 的 **Source code** 压缩包不含可执行程序。
+
+macOS / Linux 在 CLI 解压目录运行：
+
+```sh
+./gridiff "旧版本.xlsx" "新版本.xlsx"
+```
+
+Windows PowerShell 使用 `& ".\gridiff.exe" "旧版本.xlsx" "新版本.xlsx"`。默认打开浏览器对比；生成 JSON 文件用下面的报告参数。
 
 ## 给 Agent 使用
+
+把这句话发给 Codex、Cursor 或其他支持本地技能的 Agent：
+
+> 请从 https://github.com/SunneeYang/gridiff 安装 Gridiff skill，按仓库 README 和 Agent 安装说明选择当前平台的完整技能包，并验证 XLSX 对比。
+
+安装后可以直接说：
+
+- “帮我看看还没提交的 Excel 表格都改了什么。”
+- “看看装备表上次提交改了哪些地方。”
+- “这次应该只改价格，帮我检查有没有改到别的内容。”
 
 Agent 比较 CSV/XLSX，或审查包含这些文件的配置改动时，按 [Gridiff 技能说明](skills/gridiff/SKILL.md) 准备输入和解读结果；已安装时优先读取安装目录内的 `SKILL.md`，以该目录定位程序。技能包包含对应平台的 CLI，解压后将其中的 `gridiff/` 放入所用 agent 的技能目录即可；只有源码时，按 [开发说明](DEVELOPMENT.md#agent-技能包) 生成完整包。
 
@@ -85,7 +124,8 @@ XLSX 默认只比较首表，扩大范围须显式使用 `--sheets all` 或 `--s
 | --- | --- | --- |
 | **VS Code** | 选择内置 **VSCode / Visual Studio Code** | 使用内置配置 |
 | **Cursor** | 选择自定义工具，定位 Cursor 的命令行入口 | `--wait --diff $REMOTE $LOCAL` |
-| **仓库自带 Gridiff** | 选择自定义工具，定位 `<仓库>/gridiff/gridiff`；Windows 选择 `gridiff.cmd` | `$REMOTE $LOCAL` |
+| **下载的独立 CLI** | 选择自定义工具，定位解压后的 `gridiff`；Windows 选择 `gridiff.exe` | `$REMOTE $LOCAL` |
+| **团队仓库自带 Gridiff** | 选择自定义工具，定位 `<仓库>/gridiff/gridiff`；Windows 选择 `gridiff.cmd` | `$REMOTE $LOCAL` |
 
 **所有入口统一为旧文件在前、新文件在后。** Fork 自定义工具必须按上表填写顺序，占位符不要加引号；Merge Tool 保持原设置。完整步骤与快捷键见 [安装说明](docs/INSTALL.md)，按系统展示的文件选择步骤和配图见 [离线图文指南](安装与使用.html)。
 
@@ -101,11 +141,9 @@ XLSX 默认只比较首表，扩大范围须显式使用 `--sheets all` 或 `--s
 1. **保存表格**。在 Fork 选择提交或本地修改，再单击文件列表中的 CSV / XLSX，右键选择 **External Diff**。文件列表获得焦点后，也可用 macOS `⌘D` / Windows `Ctrl+D`。
 2. **确认方向与对齐**。先核对顶部旧、新来源，再看“格式”和“主键”；通常保留自动识别即可。编辑器中也可运行 **Gridiff: 比较两个文件…**，依次选择旧、新版本。
 3. **查看变化**。默认原表对照；搜索记录或旧新值，选择字段可查出整张表中涉及该字段的记录。“上一条 / 下一条”可跨页定位，上方统计始终表示当前表的全部变化。
-4. **调整阅读方式**。打开“来源与设置”查看完整旧新路径，调整格式、主键及外观。组件风格（GitHub、Material、Soft UI、Neo Brutalist）与阅读布局（精密矩阵、纸面校对、焦点审阅、紧凑终端）独立选择；所有外观设置都保留当前的原表对照/变更清单视图、筛选、页码和选中记录。两种视图均支持阅读布局：纸面增加阅读间距，终端紧凑显示；焦点在原表中将旧新值并排，在清单中显示记录队列与单条详情。风格切换保留滚动位置；布局改变行高时，浏览器可能相应调整滚动偏移。
+4. **按需要逐条查看**。点击 **变更清单** 查看每条记录涉及的字段；在 **来源与设置** 中选择 **焦点审阅** 布局，可一边选择记录，一边看旧新值。回到 **原表对照** 则继续按表格阅读。
 
 “字段”筛选只显示该字段有差异的记录和列，包含该字段涉及的新增、删除及结构变化。它与“仅看变动字段”的全表列并集规则不同；清除字段筛选即可恢复原来的列范围。焦点审阅按页列出记录队列，每次展示一条详情，不会把定位记录标记为已批准或已审查。
-
-浏览器的组件风格、阅读布局、配色、明暗会保存到系统配置目录，旧版两项外观设置会自动兼容；VS Code / Cursor 仍独立运行，组件风格与布局保存在编辑器页面状态中。设计来源与适配说明见 [组件风格方案](docs/design/style-design.md)。
 
 | 标记 | 含义 |
 | --- | --- |
@@ -115,6 +153,28 @@ XLSX 默认只比较首表，扩大范围须显式使用 `--sheets all` 或 `--s
 | **灰色文字** | 未变化的值，保留阅读上下文 |
 
 文件修改后，**网页模式从 Fork 再打开一次**，“重新计算”只使用已有快照；**插件模式点击“重新读取”**。审阅结束时，网页可点“结束比较”；插件经 Fork 的 `--wait` 启动时，还需关闭原始差异标签，Fork 才会结束等待。
+
+## 主题与阅读布局
+
+打开 **来源与设置 → 阅读与外观**，可以独立组合以下选项：
+
+| 选项 | 可选内容 | 改变什么 |
+| --- | --- | --- |
+| 组件风格 | GitHub、Material、Soft UI、Neo Brutalist | 按钮、输入框、页签的边框、圆角、阴影等；默认 Material |
+| 阅读布局 | 精密矩阵、纸面校对、焦点审阅、紧凑终端 | 信息间距、数据排布与阅读密度；默认精密矩阵 |
+| 配色（浏览器） | 默认、GitHub、Catppuccin、Solarized、Nord | 界面和差异颜色；每套都有浅、深版本 |
+| 明暗（浏览器） | 跟随系统、浅色、深色 | 默认跟随系统，也可手动固定 |
+
+**外观设置保留当前视图、筛选、页码和选中记录，不重新计算差异。** 原表对照与变更清单通过各自按钮切换。两种视图均支持四种布局：纸面增加间距，终端紧凑并使用等宽字体；焦点在原表中并排显示旧新值，在清单中显示本页记录队列与单条详情。布局改变行高时，滚动偏移可能随之调整。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/preview-focus-dark.png">
+  <img src="docs/images/preview-focus-light.png" alt="变更清单的焦点审阅：左侧选择装备记录，右侧展示铁剑价格从 100 到 120，使用 Soft UI 组件风格和 Catppuccin 配色。" width="1080">
+</picture>
+
+<p align="center"><sub>变更清单 · 焦点审阅布局 · Soft UI 组件风格 · Catppuccin 配色</sub></p>
+
+浏览器将四项外观偏好保存到系统配置目录，下次比较恢复；旧版配置自动兼容。VS Code / Cursor 提供相同的组件风格和阅读布局，保存在编辑器页面状态中，颜色与明暗跟随编辑器主题。设计来源与适配说明见 [组件风格方案](docs/design/style-design.md)。
 
 ## 支持范围
 
@@ -136,6 +196,7 @@ macOS ARM64 的 Fork CSV / XLSX 对比已验证；其余平台完成交叉构建
 | [离线图文指南](安装与使用.html) | 下载后本地打开，按系统与工具逐步操作 |
 | [使用与配置](docs/USAGE.md) | 主键、表头、Mova 规则、XLSX 语义、筛选分页与限制 |
 | [Agent 技能](skills/gridiff/SKILL.md) | Agent 调用流程，以及 Git 快照和 JSON 报告的解读入口 |
+| [Agent 安装说明](docs/AGENT-INSTALL.md) | 从远程 Release 选择完整包、校验、安装和验证 |
 | [插件说明](README.extension.md) | VS Code / Cursor 专用使用说明，也是 VSIX 的 README 来源 |
 | [开发与发布](DEVELOPMENT.md) | 构建、测试、团队仓库同步与发布流程 |
 | [性能记录](PERFORMANCE.md) | 测量方法、环境和优化结果 |
